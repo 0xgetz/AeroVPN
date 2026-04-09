@@ -10,10 +10,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import com.aerovpn.ui.navigation.BottomNavigationBar
 import com.aerovpn.ui.navigation.NavigationGraph
 import com.aerovpn.ui.navigation.NavigationItem
 import com.aerovpn.ui.theme.AeroVPNTheme
+
+enum class ConnectionStatus { CONNECTED, CONNECTING, DISCONNECTED, ERROR }
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

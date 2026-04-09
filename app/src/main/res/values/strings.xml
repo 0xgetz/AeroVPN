@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AeroVPN</string>
-    <string name="app_description">Production-ready VPN application with multi-protocol support</string>
     <string name="app_description">Fast, Secure, Private VPN</string>
     
     <!-- Navigation -->

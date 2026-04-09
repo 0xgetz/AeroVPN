@@ -118,18 +118,11 @@ class UdpTunnelProtocol(
     }
 
     override suspend fun reconnect(maxRetries: Int, initialDelayMs: Long) {
-        currentConfig?.let { cfg ->
-            scope.launch {
-                super.reconnect(maxRetries, initialDelayMs)
-            }
-        }
+        super.reconnect(maxRetries, initialDelayMs)
     }
 
     override protected suspend fun tryReconnect(): Boolean {
-        return currentConfig?.let { config ->
-            val builder = VpnService.Builder()
-            connect(config, builder)
-        } ?: false
+        return false // No VpnService reference available for reconnect
     }
 
     /**
@@ -414,16 +407,16 @@ class UdpTunnelProtocol(
  * UDP-specific statistics
  */
 data class UdpStatistics(
-    override val bytesSent: Long = 0L,
-    override val bytesReceived: Long = 0L,
-    override val duration: Long = 0L,
-    override val packetsSent: Long = 0L,
-    override val packetsReceived: Long = 0L,
+    val bytesSent: Long = 0L,
+    val bytesReceived: Long = 0L,
+    val duration: Long = 0L,
+    val packetsSent: Long = 0L,
+    val packetsReceived: Long = 0L,
     val socketTimeout: Long = 30000L,
     val bufferSize: Int = 65536,
     val droppedPackets: Long = 0L,
     val outOfOrderPackets: Long = 0L
-) : ConnectionStatistics(bytesSent, bytesReceived, 0L, duration, packetsSent, packetsReceived)
+)
 
 /**
  * UDP routing mode
@@ -447,7 +440,7 @@ data class UdpTunnelConfig(
     val routeMode: UdpRouteMode = UdpRouteMode.ALL_UDP,
     val udpPorts: List<Int> = emptyList(),
     val targetIPs: List<String> = emptyList(),
-    val timeout: Long = DEFAULT_TIMEOUT,
+    val timeout: Long = 30000L,
     val useEncryption: Boolean = false,
     val encryptionKey: String? = null,
     val useHandshake: Boolean = true,

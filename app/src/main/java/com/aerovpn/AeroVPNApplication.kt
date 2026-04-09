@@ -17,7 +17,7 @@ class AeroVPNApplication : Application(), Configuration.Provider {
         initializeWorkManager()
     }
 
-    override fun getWorkManagerConfiguration(): Configuration {
+    override val workManagerConfiguration: Configuration get() {
         return Configuration.Builder()
             .setMinimumLoggingLevel(android.util.Log.INFO)
             .build()

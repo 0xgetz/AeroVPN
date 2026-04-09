@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import androidx.compose.ui.draw.scale
 
 enum class ConnectionStatus {
     DISCONNECTED,
@@ -285,12 +286,12 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
                         ConnectionStat(
-                            icon = Icons.Download,
+                            icon = Icons.Default.ArrowDownward,
                             label = "Download",
                             value = "24.5 MB/s"
                         )
                         ConnectionStat(
-                            icon = Icons.Upload,
+                            icon = Icons.Default.ArrowUpward,
                             label = "Upload",
                             value = "8.2 MB/s"
                         )

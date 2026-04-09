@@ -198,7 +198,7 @@ object CustomDnsTool {
 
     private fun extractIpFromDohResponse(response: String): String? {
         return try {
-            val org.json.JSONObject(response)
+            org.json.JSONObject(response)
                 .getJSONArray("Answer")
                 .getJSONObject(0)
                 .optString("data", null)

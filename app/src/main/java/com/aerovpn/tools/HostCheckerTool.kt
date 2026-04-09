@@ -117,19 +117,28 @@ object HostCheckerTool {
             
             sslContext.init(null, arrayOf(trustManager), null)
             
-            val url = URL("https://$host:$port")
-            val connection = url.openConnection() as HttpsURLConnection
+            val url = java.net.URL("https://$host:$port")
+            val connection = url.openConnection() as javax.net.ssl.HttpsURLConnection
             connection.sslSocketFactory = sslContext.socketFactory
-            connection.hostnameVerifier = { _, _ -> true }
+            connection.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }
             connection.connectTimeout = timeout
             connection.readTimeout = timeout
             connection.requestMethod = "HEAD"
             
-            // Connect to get SSL session
+            // Use a cert-capturing trust manager to get peer certificates
+            val capturedCerts = mutableListOf<java.security.cert.X509Certificate>()
+            val certCaptureTm = object : javax.net.ssl.X509TrustManager {
+                override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
+                override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {
+                    capturedCerts.addAll(chain)
+                }
+                override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+            }
+            val captureSslCtx = javax.net.ssl.SSLContext.getInstance("TLS")
+            captureSslCtx.init(null, arrayOf(certCaptureTm), null)
+            connection.sslSocketFactory = captureSslCtx.socketFactory
             connection.connect()
-            
-            val session = connection.sslSession
-            val certificates = session.peerCertificates
+            val certificates: Array<java.security.cert.Certificate> = capturedCerts.toTypedArray()
             
             if (certificates.isNotEmpty()) {
                 val cert = certificates[0] as X509Certificate
@@ -138,17 +147,17 @@ object HostCheckerTool {
                 val daysUntilExpiry = ((expiryDate.time - now.time) / (1000 * 60 * 60 * 24)).toInt()
                 
                 SslInfo(
-                    valid = !cert.hasExpired(now) && !cert.notBefore.after(now),
+                    valid = !now.after(cert.notAfter) && !cert.notBefore.after(now),
                     issuer = cert.issuerDN?.name ?: "Unknown",
                     subject = cert.subjectDN?.name ?: "Unknown",
                     validFrom = cert.notBefore,
                     validTo = expiryDate,
                     serialNumber = cert.serialNumber.toString(16),
                     signatureAlgorithm = cert.sigAlgName ?: "Unknown",
-                    protocol = session.protocol,
-                    cipherSuite = session.cipherSuite,
+                    protocol = "TLS",
+                    cipherSuite = "Unknown",
                     peerCertificates = certificates.size,
-                    isExpired = cert.hasExpired(now),
+                    isExpired = now.after(cert.notAfter),
                     daysUntilExpiry = daysUntilExpiry,
                     subjectAlternativeNames = getSubjectAlternativeNames(cert)
                 )

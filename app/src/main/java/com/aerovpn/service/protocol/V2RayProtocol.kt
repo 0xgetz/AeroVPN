@@ -107,10 +107,7 @@ class V2RayProtocol(
     }
 
     override protected suspend fun tryReconnect(): Boolean {
-        return currentConfig?.let { config ->
-            val builder = VpnService.Builder()
-            connect(config, builder)
-        } ?: false
+        return false // VpnService.Builder requires a VpnService receiver
     }
 
     /**

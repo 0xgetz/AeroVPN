@@ -1,7 +1,6 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
-    id 'org.jetbrains.kotlin.plugin.compose'
 }
 
 android {
@@ -133,7 +132,8 @@ dependencies {
 
     // VPN Libraries
     // WireGuard
-    implementation 'com.wireguard:wireguard:0.0.10'
+    // implementation 'com.wireguard:wireguard:0.0.10' // not available
+    // implementation 'com.wireguard.android:tunnel:1.0.20230705' // not available
     
     // JSCH for SSH
     implementation 'com.jcraft:jsch:0.1.55'
@@ -142,7 +142,7 @@ dependencies {
     // implementation files('libs/v2ray-core.aar')
     
     // Shadowsocks library
-    implementation 'com.github.shadowsocks:shadowsocks-libev:3.3.5'
+    // implementation 'com.github.shadowsocks:shadowsocks-libev:3.3.5' // not available on jitpack
 
     // Image Loading - Coil
     implementation 'io.coil-kt:coil-compose:2.5.0'

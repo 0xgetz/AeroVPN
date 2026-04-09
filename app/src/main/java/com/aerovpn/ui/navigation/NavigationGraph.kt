@@ -8,6 +8,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.aerovpn.ui.screens.*
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
 
 @Composable
 fun NavigationGraph(
@@ -140,13 +147,13 @@ fun ToolDetailScreen(
     // Each tool (IP Hunter, Ping Tools, DNS Checker, etc.) would have its own implementation
     androidx.compose.foundation.layout.Column(
         modifier = androidx.compose.ui.Modifier
-            .androidx.compose.foundation.layout.fillMaxSize()
-            .androidx.compose.foundation.layout.padding(16.dp)
+            .fillMaxSize()
+            .padding(16.dp)
     ) {
         androidx.compose.material3.Text(
             text = "Tool: $toolId",
             style = androidx.compose.ui.text.TextStyle(
-                fontSize = androidx.compose.ui.unit.TextUnit.Companion.Sp(20)
+                fontSize = 20.sp
             )
         )
     }
@@ -160,13 +167,13 @@ fun ConfigDetailScreen(
     // Placeholder for config detail screen
     androidx.compose.foundation.layout.Column(
         modifier = androidx.compose.ui.Modifier
-            .androidx.compose.foundation.layout.fillMaxSize()
-            .androidx.compose.foundation.layout.padding(16.dp)
+            .fillMaxSize()
+            .padding(16.dp)
     ) {
         androidx.compose.material3.Text(
             text = "Config: $configId",
             style = androidx.compose.ui.text.TextStyle(
-                fontSize = androidx.compose.ui.unit.TextUnit.Companion.Sp(20)
+                fontSize = 20.sp
             )
         )
     }
