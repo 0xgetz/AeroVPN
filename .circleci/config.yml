@@ -69,7 +69,7 @@ jobs:
               --title "Release $VERSION" \
               --generate-notes \
               --draft
-        when: on_success
+          when: on_success
 
 workflows:
   build-and-release:
