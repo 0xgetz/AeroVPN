@@ -283,17 +283,11 @@ class UdpTunnelProtocol(
     private fun createEncryptedHandshake(config: UdpTunnelConfig): ByteArray {
         val timestamp = System.currentTimeMillis()
         val data = "HANDSHAKE:$timestamp".toByteArray()
-        
-        if (config.encryptionKey != null) {
-            // In production, use proper encryption
-            // For now, simple XOR as placeholder
-            val key = config.encryptionKey.toByteArray()
-            return data.mapIndexed { index, byte ->
-                (byte.toInt() xor key[index % key.size].toInt()).toByte()
-            }.toByteArray()
+        return if (config.encryptionKey != null) {
+            encryptUdpData(data, config.encryptionKey)
+        } else {
+            data
         }
-        
-        return data
     }
 
     /**
@@ -338,20 +332,74 @@ class UdpTunnelProtocol(
      * Decrypt UDP data
      */
     private fun decryptUdpData(data: ByteArray, key: String): ByteArray {
-        // Simple XOR decryption (production should use proper encryption like AES-GCM)
-        val keyBytes = key.toByteArray()
-        return data.mapIndexed { index, byte ->
-            (byte.toInt() xor keyBytes[index % keyBytes.size].toInt()).toByte()
-        }.toByteArray()
+        return try {
+            // AES-GCM decryption: first 12 bytes are the IV/nonce, rest is ciphertext+tag
+            if (data.size < 12 + 16) {
+                Log.w(TAG, "UDP packet too short for AES-GCM decryption (${data.size} bytes)")
+                return data
+            }
+            val iv = data.copyOfRange(0, 12)
+            val ciphertext = data.copyOfRange(12, data.size)
+            val keyBytes = deriveAesKey(key)
+            val secretKey = javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
+            val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(
+                javax.crypto.Cipher.DECRYPT_MODE,
+                secretKey,
+                javax.crypto.spec.GCMParameterSpec(128, iv)
+            )
+            cipher.doFinal(ciphertext)
+        } catch (e: Exception) {
+            Log.e(TAG, "AES-GCM decryption failed: ${e.message}")
+            data
+        }
+    }
+
+    private fun encryptUdpData(data: ByteArray, key: String): ByteArray {
+        val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+        val keyBytes = deriveAesKey(key)
+        val secretKey = javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(
+            javax.crypto.Cipher.ENCRYPT_MODE,
+            secretKey,
+            javax.crypto.spec.GCMParameterSpec(128, iv)
+        )
+        val ciphertext = cipher.doFinal(data)
+        return iv + ciphertext
+    }
+
+    /** Derive a 256-bit AES key from the given string using SHA-256. */
+    private fun deriveAesKey(key: String): ByteArray {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        return md.digest(key.toByteArray(Charsets.UTF_8))
     }
 
     /**
      * Forward packet to VPN interface
      */
+    /**
+     * Write a decrypted IP packet into the VPN tun interface so the kernel can
+     * route it to the correct local socket.  tunOutputStream must be set by the
+     * caller (AeroVpnService) after establish() returns the ParcelFileDescriptor.
+     */
+    @Volatile
+    var tunOutputStream: java.io.OutputStream? = null
+
     private fun forwardToVpnInterface(data: ByteArray) {
-        // In production, this would write to the VPN file descriptor
-        // For now, just log
-        Log.d(TAG, "Forwarding ${data.size} bytes to VPN interface")
+        val out = tunOutputStream
+        if (out == null) {
+            Log.w(TAG, "tunOutputStream not set - cannot forward ${data.size} bytes to VPN interface")
+            return
+        }
+        try {
+            // Write the complete IP packet; the kernel tun driver handles framing.
+            out.write(data)
+            out.flush()
+            Log.v(TAG, "Forwarded ${data.size} bytes to VPN tun interface")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write to tun interface: ${e.message}")
+        }
     }
 
     /**
@@ -382,16 +430,7 @@ class UdpTunnelProtocol(
         }
     }
 
-    /**
-     * Encrypt UDP data
-     */
-    private fun encryptUdpData(data: ByteArray, key: String): ByteArray {
-        // Simple XOR encryption (production should use proper encryption)
-        val keyBytes = key.toByteArray()
-        return data.mapIndexed { index, byte ->
-            (byte.toInt() xor keyBytes[index % keyBytes.size].toInt()).toByte()
-        }.toByteArray()
-    }
+
 
     /**
      * Get UDP socket statistics

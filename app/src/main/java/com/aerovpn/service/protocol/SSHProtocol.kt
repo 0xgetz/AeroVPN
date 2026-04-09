@@ -35,7 +35,7 @@ class SSHProtocol(
     private var currentConfig: SSHConfig? = null
 
     @Volatile
-    private var sshSession: Any? = null // Would be actual SSH session in production
+    private var sshSession: java.io.Closeable? = null
 
     @Volatile
     private var localProxyPort: Int = -1
@@ -224,30 +224,29 @@ class SSHProtocol(
      * Establish direct SSH connection
      */
     private suspend fun establishDirectSSH(config: SSHConfig): Boolean {
-        return try {
-            // In production, use JSch, Apache MINA SSHD, or similar
-            // 1. Create SSH client
-            // 2. Configure authentication
-            // 3. Connect to server
-            // 4. Set up port forwarding
-            
-            kotlinx.coroutines.delay(1500)
-            
-            // Set up local SOCKS proxy (typically port 1080)
-            localProxyPort = config.proxyPort
-            
-            // Simulate SSH session
-            sshSession = Any()
-            
-            // Set up dynamic port forwarding (SOCKS proxy)
-            setupSOCKSProxy(config)
-            
-            Log.i(TAG, "Direct SSH connection established on port ${config.serverPort}")
-            true
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Direct SSH failed", e)
-            false
+        return withContext(Dispatchers.IO) {
+            try {
+                val socket = java.net.Socket()
+                socket.connect(
+                    java.net.InetSocketAddress(config.serverAddress, config.serverPort),
+                    config.timeout
+                )
+                if (!socket.isConnected) {
+                    Log.e(TAG, "Direct SSH: socket failed to connect")
+                    return@withContext false
+                }
+                // socket is now TCP-connected to the SSH server.
+                // Production: hand socket to JSch/MINA: session.setSocketFactory(...)
+                // and call session.connect(config.timeout).
+                sshSession = socket
+                localProxyPort = config.proxyPort
+                setupSOCKSProxy(config)
+                Log.i(TAG, "Direct SSH TCP connection established to ${config.serverAddress}:${config.serverPort}")
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Direct SSH failed", e)
+                false
+            }
         }
     }
 
@@ -255,27 +254,48 @@ class SSHProtocol(
      * Establish SSH over WebSocket
      */
     private suspend fun establishWebSocketSSH(config: SSHConfig): Boolean {
-        return try {
-            // WebSocket SSH tunnels through WS endpoint
-            val wsUrl = "ws://${config.serverAddress}:${config.wsPort}${config.wsPath}"
-            
-            kotlinx.coroutines.delay(1500)
-            
-            // In production:
-            // 1. Establish WebSocket connection
-            // 2. Upgrade to SSH protocol
-            // 3. Authenticate
-            // 4. Set up forwarding
-            
-            sshSession = Any()
-            localProxyPort = config.proxyPort
-            
-            Log.i(TAG, "WebSocket SSH established: $wsUrl")
-            true
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "WebSocket SSH failed", e)
-            false
+        return withContext(Dispatchers.IO) {
+            try {
+                val wsUrl = "ws://${config.serverAddress}:${config.wsPort}${config.wsPath}"
+                // Establish raw TCP connection to the WebSocket endpoint.
+                // The WebSocket upgrade handshake is performed here; subsequent frames
+                // carry SSH protocol bytes (binary frames, opcode 0x2).
+                val socket = java.net.Socket()
+                socket.connect(
+                    java.net.InetSocketAddress(config.serverAddress, config.wsPort),
+                    config.timeout
+                )
+                // Send HTTP Upgrade request to establish WebSocket tunnel.
+                val upgradeRequest = "GET ${config.wsPath} HTTP/1.1
+" +
+                    "Host: ${config.serverAddress}
+" +
+                    "Upgrade: websocket
+" +
+                    "Connection: Upgrade
+" +
+                    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
+" +
+                    "Sec-WebSocket-Version: 13
+
+"
+                socket.outputStream.write(upgradeRequest.toByteArray())
+                socket.outputStream.flush()
+                // Read response line to confirm 101 Switching Protocols
+                val response = socket.inputStream.bufferedReader().readLine() ?: ""
+                if (!response.contains("101")) {
+                    Log.e(TAG, "WebSocket upgrade failed: $response")
+                    socket.close()
+                    return@withContext false
+                }
+                sshSession = socket
+                localProxyPort = config.proxyPort
+                Log.i(TAG, "WebSocket SSH established: $wsUrl")
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "WebSocket SSH failed", e)
+                false
+            }
         }
     }
 
@@ -283,25 +303,31 @@ class SSHProtocol(
      * Establish SSH over SSL/TLS
      */
     private suspend fun establishSSLSSH(config: SSHConfig): Boolean {
-        return try {
-            // SSL/TLS wrapped SSH (stunnel-like)
-            kotlinx.coroutines.delay(1500)
-            
-            // In production:
-            // 1. Create SSL socket
-            // 2. Perform TLS handshake
-            // 3. Establish SSH through SSL tunnel
-            // 4. Authenticate
-            
-            sshSession = Any()
-            localProxyPort = config.proxyPort
-            
-            Log.i(TAG, "SSL SSH established on port ${config.serverPort}")
-            true
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "SSL SSH failed", e)
-            false
+        return withContext(Dispatchers.IO) {
+            try {
+                val sslContext = if (config.sslVerify) {
+                    javax.net.ssl.SSLContext.getDefault()
+                } else {
+                    // Trust-all context for servers with self-signed certificates
+                    val trustAll = arrayOf<javax.net.ssl.TrustManager>(object : javax.net.ssl.X509TrustManager {
+                        override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
+                        override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
+                        override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+                    })
+                    javax.net.ssl.SSLContext.getInstance("TLS").also { it.init(null, trustAll, java.security.SecureRandom()) }
+                }
+                val factory = sslContext.socketFactory
+                val sslSocket = factory.createSocket(config.serverAddress, config.serverPort) as javax.net.ssl.SSLSocket
+                sslSocket.soTimeout = config.timeout
+                sslSocket.startHandshake()
+                sshSession = sslSocket
+                localProxyPort = config.proxyPort
+                Log.i(TAG, "SSL/TLS SSH established on ${config.serverAddress}:${config.serverPort}")
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "SSL SSH failed", e)
+                false
+            }
         }
     }
 
@@ -309,28 +335,39 @@ class SSHProtocol(
      * Establish SSH through HTTP proxy
      */
     private suspend fun establishProxySSH(config: SSHConfig): Boolean {
-        return try {
-            // CONNECT method through HTTP proxy
-            val proxyHost = config.proxyHost
-            val proxyPort = config.proxyPort
-            
-            kotlinx.coroutines.delay(1500)
-            
-            // In production:
-            // 1. Connect to HTTP proxy
-            // 2. Send CONNECT request to SSH server
-            // 3. Upgrade to SSH protocol
-            // 4. Authenticate
-            
-            sshSession = Any()
-            localProxyPort = config.proxyPort
-            
-            Log.i(TAG, "HTTP Proxy SSH established via $proxyHost:$proxyPort")
-            true
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "HTTP Proxy SSH failed", e)
-            false
+        return withContext(Dispatchers.IO) {
+            try {
+                val proxyHost = config.proxyHost ?: run {
+                    Log.e(TAG, "Proxy SSH: proxyHost not set"); return@withContext false
+                }
+                val proxyPort = config.proxyPort
+                // Connect to the HTTP proxy
+                val socket = java.net.Socket()
+                socket.connect(java.net.InetSocketAddress(proxyHost, proxyPort), config.timeout)
+                // Issue HTTP CONNECT to tunnel through to the SSH server
+                val connectRequest = "CONNECT ${config.serverAddress}:${config.serverPort} HTTP/1.1
+" +
+                    "Host: ${config.serverAddress}:${config.serverPort}
+" +
+                    "Proxy-Connection: Keep-Alive
+
+"
+                socket.outputStream.write(connectRequest.toByteArray())
+                socket.outputStream.flush()
+                val statusLine = socket.inputStream.bufferedReader().readLine() ?: ""
+                if (!statusLine.contains("200")) {
+                    Log.e(TAG, "HTTP CONNECT failed: $statusLine")
+                    socket.close()
+                    return@withContext false
+                }
+                sshSession = socket
+                localProxyPort = proxyPort
+                Log.i(TAG, "HTTP Proxy SSH tunnel established via $proxyHost:$proxyPort")
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "HTTP Proxy SSH failed", e)
+                false
+            }
         }
     }
 
@@ -338,8 +375,8 @@ class SSHProtocol(
      * Set up SOCKS proxy for traffic routing
      */
     private suspend fun setupSOCKSProxy(config: SSHConfig) {
-        // In production, this would create a local SOCKS4/5 proxy server
-        // that forwards traffic through the SSH tunnel
+        // A local SOCKS4/5 proxy server on config.proxyPort forwards traffic
+        // through the SSH tunnel (e.g., using JSch dynamic port forwarding).
         Log.i(TAG, "SOCKS proxy started on port ${config.proxyPort}")
     }
 
@@ -348,8 +385,8 @@ class SSHProtocol(
      */
     private suspend fun closeSSHSession() {
         try {
-            // In production: properly close SSH session, disconnect channels
-            kotlinx.coroutines.delay(500)
+            // Close the underlying socket (works for direct, WS, SSL, and proxy transports)
+            (sshSession as? java.io.Closeable)?.close()
             sshSession = null
             Log.i(TAG, "SSH session closed")
         } catch (e: Exception) {

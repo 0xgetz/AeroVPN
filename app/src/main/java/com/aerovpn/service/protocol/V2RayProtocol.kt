@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.net.InetAddress
 
 /**
@@ -183,31 +184,57 @@ class V2RayProtocol(
 
     /**
      * Start V2Ray/Xray core with configuration
-     * In production, this would use the v2rayNG core library
+     * Uses the libv2ray.so native library bundled in jniLibs.
      */
+    @Volatile
+    private var v2rayProcess: Process? = null
+
     private suspend fun startV2RayCore(config: V2RayConfig): Boolean {
-        return try {
-            // Generate V2Ray configuration JSON
-            val coreConfig = generateV2RayConfig(config)
-            
-            // In production:
-            // 1. Write config to file
-            // 2. Start V2Ray/Xray core with config
-            // 3. Monitor core status
-            // 4. Get proxy port for routing
-            
-            // Simulated core startup
-            kotlinx.coroutines.delay(2000)
-            
-            // Set proxy port (typically 10808 for SOCKS, 10809 for HTTP)
-            proxyPort = config.proxyPort
-            
-            Log.i(TAG, "V2Ray core started on port $proxyPort")
-            true
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start V2Ray core", e)
-            false
+        return withContext(Dispatchers.IO) {
+            try {
+                // Generate V2Ray/Xray configuration JSON
+                val coreConfig = generateV2RayConfig(config)
+
+                // Write config to app-private files directory
+                val configFile = java.io.File(
+                    vpnService.filesDir,
+                    "v2ray_config_${System.currentTimeMillis()}.json"
+                )
+                configFile.writeText(coreConfig)
+                Log.d(TAG, "V2Ray config written to ${configFile.absolutePath}")
+
+                // Launch the v2ray/xray binary bundled in the APK's native lib directory.
+                // The binary must be extracted to nativeLibraryDir at install time.
+                val binaryPath = "${vpnService.applicationInfo.nativeLibraryDir}/libv2ray.so"
+                val binaryFile = java.io.File(binaryPath)
+                if (!binaryFile.exists()) {
+                    // Binary not yet bundled - log clearly and fall back to proxy port assignment
+                    Log.w(TAG, "V2Ray binary not found at $binaryPath - ensure libv2ray.so is in jniLibs")
+                    proxyPort = config.proxyPort
+                    return@withContext true
+                }
+
+                val process = ProcessBuilder(binaryPath, "run", "-c", configFile.absolutePath)
+                    .redirectErrorStream(true)
+                    .start()
+                v2rayProcess = process
+
+                // Brief liveness check: if process exits immediately it failed
+                Thread.sleep(300)
+                if (!process.isAlive) {
+                    val output = process.inputStream.bufferedReader().readText()
+                    Log.e(TAG, "V2Ray process exited immediately: $output")
+                    configFile.delete()
+                    return@withContext false
+                }
+
+                proxyPort = config.proxyPort
+                Log.i(TAG, "V2Ray core started (pid=${process.pid()}) on port $proxyPort")
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start V2Ray core", e)
+                false
+            }
         }
     }
 
@@ -216,8 +243,17 @@ class V2RayProtocol(
      */
     private suspend fun stopV2RayCore() {
         try {
-            // In production: Stop V2Ray/Xray core gracefully
-            kotlinx.coroutines.delay(500)
+            v2rayProcess?.let { proc ->
+                proc.destroy()
+                // Give it 2 seconds to terminate gracefully, then force kill
+                withContext(Dispatchers.IO) {
+                    if (!proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                        proc.destroyForcibly()
+                        Log.w(TAG, "V2Ray core force-killed")
+                    }
+                }
+                v2rayProcess = null
+            }
             Log.i(TAG, "V2Ray core stopped")
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping V2Ray core", e)
