@@ -22,7 +22,7 @@ jobs:
       
       - run:
           name: Run Build
-          command: ./gradlew clean assembleRelease
+          command: ./gradlew clean assembleDebug
       
       - save_cache:
           key: gradle-v1-{{ checksum "build.gradle" }}-{{ checksum "app/build.gradle" }}
@@ -31,15 +31,15 @@ jobs:
             - /usr/local/android-sdk
       
       - store_artifacts:
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
-          destination: AeroVPN-release.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          destination: AeroVPN-debug.apk
       
       - store_artifacts:
-          path: app/build/outputs/apk/release/
-          destination: apk-release
+          path: app/build/outputs/apk/debug/
+          destination: apk-debug
       
       - persist_to_workspace:
-          root: app/build/outputs/apk/release/
+          root: app/build/outputs/apk/debug/
           paths:
             - "*.apk"
   
