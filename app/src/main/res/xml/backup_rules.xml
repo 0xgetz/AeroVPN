@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Include shared preferences for app settings -->
+    <include
+        domain="sharedpref"
+        path="." />
+    
+    <!-- Include database for server lists and configs -->
+    <include
+        domain="database"
+        path="." />
+    
+    <!-- Exclude sensitive data from backup -->
+    <exclude
+        domain="sharedpref"
+        path="device_info.xml" />
+    <exclude
+        domain="file"
+        path="backup_key" />
+</full-backup-content>

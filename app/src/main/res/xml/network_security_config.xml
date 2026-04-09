@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Base configuration: no cleartext traffic allowed -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- Trust system CAs -->
+            <certificates src="system" />
+            <!-- Trust user-added CAs for debugging -->
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+    
+    <!-- Debug configuration: allow cleartext for localhost -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="user" />
+        </trust-anchors>
+        <domain-config cleartextTrafficPermitted="true">
+            <domain includeSubdomains="true">localhost</domain>
+            <domain includeSubdomains="true">127.0.0.1</domain>
+            <domain includeSubdomains="true">10.0.2.2</domain>
+        </domain-config>
+    </debug-overrides>
+    
+    <!-- Specific domain configurations -->
+    <domain-config cleartextTrafficPermitted="false">
+        <!-- Add specific domain pinning if needed -->
+        <pin-set expiration="2026-12-31">
+            <!-- Add certificate pins for critical domains -->
+        </pin-set>
+    </domain-config>
+</network-security-config>

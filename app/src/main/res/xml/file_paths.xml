@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- External files directory for config exports -->
+    <external-files-path
+        name="external_files"
+        path="." />
+    
+    <!-- Cache directory for temporary files -->
+    <cache-path
+        name="cache"
+        path="." />
+    
+    <!-- Files directory for shared configs -->
+    <files-path
+        name="files"
+        path="." />
+    
+    <!-- External cache for large config files -->
+    <external-cache-path
+        name="external_cache"
+        path="." />
+</paths>
