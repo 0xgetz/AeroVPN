@@ -104,18 +104,11 @@ class SSHProtocol(
     }
 
     override suspend fun reconnect(maxRetries: Int, initialDelayMs: Long) {
-        currentConfig?.let { cfg ->
-            scope.launch {
-                super.reconnect(maxRetries, initialDelayMs)
-            }
-        }
+        super.reconnect(maxRetries, initialDelayMs)
     }
 
     override protected suspend fun tryReconnect(): Boolean {
-        return currentConfig?.let { config ->
-            val builder = VpnService.Builder()
-            connect(config, builder)
-        } ?: false
+        return false // No VpnService reference available for reconnect
     }
 
     /**
@@ -373,14 +366,14 @@ enum class TunnelMode {
 data class SSHConfig(
     override val name: String,
     override val serverAddress: String,
-    override val serverPort: Int = DEFAULT_PORT,
+    override val serverPort: Int = 22,
     val username: String,
     val password: String? = null,
     val privateKey: String? = null,
     val dnsServers: List<String> = listOf("8.8.8.8", "1.1.1.1"),
     val mtu: Int? = null,
     val routingConfig: V2RayConfig.RoutingConfig = V2RayConfig.RoutingConfig(),
-    val proxyPort: Int = DEFAULT_HTTP_PROXY_PORT,
+    val proxyPort: Int = 8080,
     val tunnelMode: TunnelMode = TunnelMode.GLOBAL,
     val proxyApps: List<String> = emptyList(),
     

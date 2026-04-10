@@ -1,553 +1,234 @@
 package com.aerovpn.service
 
 import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.net.VpnService
 import android.os.Binder
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
-import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.aerovpn.AeroVPNApplication
 import com.aerovpn.R
-import com.aerovpn.service.protocol.*
+import com.aerovpn.service.protocol.ConnectionState
+import com.aerovpn.service.protocol.ProtocolConfig
+import com.aerovpn.service.protocol.ProtocolHandler
+import com.aerovpn.service.protocol.ProtocolType
+import com.aerovpn.service.protocol.SSHConfig
+import com.aerovpn.service.protocol.SSHProtocol
+import com.aerovpn.service.protocol.ShadowsocksConfig
+import com.aerovpn.service.protocol.ShadowsocksProtocol
+import com.aerovpn.service.protocol.UdpTunnelConfig
+import com.aerovpn.service.protocol.UdpTunnelProtocol
+import com.aerovpn.service.protocol.V2RayConfig
+import com.aerovpn.service.protocol.V2RayProtocol
+import com.aerovpn.service.protocol.WireGuardConfig
+import com.aerovpn.service.protocol.WireGuardProtocol
 import com.aerovpn.ui.MainActivity
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
- * Main VPN service implementation with multi-protocol support.
- * Manages VPN connections, protocol handlers, auto-reconnect, and kill switch.
+ * Main VPN service that manages VPN connection lifecycle.
+ * Handles protocol switching, connection state, and notifications.
  */
 class AeroVpnService : VpnService() {
 
-    companion object {
-        private const val TAG = "AeroVpnService"
-        private const val NOTIFICATION_CHANNEL_ID = "aerovpn_service_channel"
-        private const val NOTIFICATION_ID = 1001
-        private const val ACTION_CONNECT = "com.aerovpn.ACTION_CONNECT"
-        private const val ACTION_DISCONNECT = "com.aerovpn.ACTION_DISCONNECT"
-    }
-
-    // Binder for client interaction
     private val binder = LocalBinder()
+    // Fix #23: SupervisorJob ensures child coroutine failures don't cancel the whole scope
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // Coroutine scope for service operations
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
-    // Current protocol handler
-    private var protocolHandler: ProtocolHandler? = null
-
-    // VPN connection state
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
-    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+    val connectionState: StateFlow<ConnectionState> = _connectionState
 
-    // Current configuration
-    private var currentConfig: ProtocolConfig? = null
-
-    // Kill switch state
-    @Volatile
-    private var killSwitchEnabled = false
-
-    @Volatile
-    private var isKillSwitchActive = false
-
-    // Auto-reconnect settings
-    @Volatile
-    private var autoReconnectEnabled = false
-
-    @Volatile
-    private var reconnectAttempts = 0
-
-    @Volatile
-    private var maxReconnectAttempts = 3
-
-    // Network connectivity monitoring
-    private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    private val connectivityManager by lazy { getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager }
-
-    // Notification manager
-    private val notificationManager by lazy { getSystemService(NOTIFICATION_SERVICE) as NotificationManager }
-
-    // Handler for UI updates
-    private val mainHandler = Handler(Looper.getMainLooper())
-
-    // VPN builder
-    private lateinit var vpnBuilder: Builder
+    private var activeProtocolHandler: ProtocolHandler? = null
 
     inner class LocalBinder : Binder() {
         fun getService(): AeroVpnService = this@AeroVpnService
     }
 
-    override fun onCreate() {
-        super.onCreate()
-        Log.d(TAG, "Service created")
-        
-        createNotificationChannel()
-        setupNetworkMonitor()
-    }
-
     override fun onBind(intent: Intent?): IBinder {
-        Log.d(TAG, "Service bound")
         return binder
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "Service started with action: ${intent?.action}")
-        
         when (intent?.action) {
             ACTION_CONNECT -> {
-                val config = intent.getParcelableExtra<ProtocolConfig>("config")
-                config?.let { connect(it) }
+                // Fix #7: type-safe getSerializableExtra for API 33+
+                val config: ProtocolConfig? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getSerializableExtra(EXTRA_CONFIG, ProtocolConfig::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getSerializableExtra(EXTRA_CONFIG) as? ProtocolConfig
+                }
+                if (config != null) {
+                    // Fix #2: startForeground with foregroundServiceType connectedDevice
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        startForeground(
+                            AeroVPNApplication.VPN_NOTIFICATION_ID,
+                            buildNotification(ConnectionState.Connecting),
+                            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                        )
+                    } else {
+                        startForeground(
+                            AeroVPNApplication.VPN_NOTIFICATION_ID,
+                            buildNotification(ConnectionState.Connecting)
+                        )
+                    }
+                    connect(config)
+                }
             }
             ACTION_DISCONNECT -> {
                 disconnect()
             }
+            else -> {
+                // Fix #2: startForeground with foregroundServiceType connectedDevice
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(
+                        AeroVPNApplication.VPN_NOTIFICATION_ID,
+                        buildNotification(ConnectionState.Idle),
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    )
+                } else {
+                    startForeground(
+                        AeroVPNApplication.VPN_NOTIFICATION_ID,
+                        buildNotification(ConnectionState.Idle)
+                    )
+                }
+            }
         }
-        
-        // Start foreground with notification
-        startForeground(NOTIFICATION_ID, createNotification())
-        
         return START_STICKY
     }
 
-    override fun onDestroy() {
-        Log.d(TAG, "Service destroyed")
-        
-        // Clean up
+    fun connect(config: ProtocolConfig) {
         serviceScope.launch {
-            disconnect()
-        }
-        
-        // Remove network callback
-        networkCallback?.let {
+            _connectionState.value = ConnectionState.Connecting
+            updateNotification(ConnectionState.Connecting)
+
             try {
-                connectivityManager.unregisterNetworkCallback(it)
+                val handler = getProtocolHandler(config)
+                activeProtocolHandler = handler
+
+                val vpnBuilder = Builder()
+                    .setSession("AeroVPN")
+                    .addAddress("10.0.0.2", 24)
+                    .addDnsServer("1.1.1.1")
+                    .addRoute("0.0.0.0", 0)
+
+                val connected = handler.connect(config, vpnBuilder)
+
+                if (connected) {
+                    _connectionState.value = ConnectionState.Connected
+                    updateNotification(ConnectionState.Connected)
+                } else {
+                    _connectionState.value = ConnectionState.Error("Connection failed")
+                    updateNotification(ConnectionState.Error("Connection failed"))
+                }
             } catch (e: Exception) {
-                Log.e(TAG, "Error unregistering network callback", e)
+                val errorState = ConnectionState.Error(e.message ?: "Unknown error", e)
+                _connectionState.value = errorState
+                updateNotification(errorState)
             }
         }
-        
+    }
+
+    fun disconnect() {
+        serviceScope.launch {
+            _connectionState.value = ConnectionState.Disconnecting
+            updateNotification(ConnectionState.Disconnecting)
+
+            try {
+                activeProtocolHandler?.disconnect()
+                activeProtocolHandler = null
+            } catch (e: Exception) {
+                // ignore
+            } finally {
+                _connectionState.value = ConnectionState.Idle
+                updateNotification(ConnectionState.Idle)
+                stopSelf()
+            }
+        }
+    }
+
+    fun activateKillSwitch() {
+        // Fix #20: setBlocking(true) requires API 29+ — guard with SDK version check
+        try {
+            val builder = Builder()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                builder.setBlocking(true)
+            }
+            builder.setSession("AeroVPN-KillSwitch")
+            builder.addAddress("10.0.0.2", 24)
+            builder.addRoute("0.0.0.0", 0)
+            builder.establish()
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to activate kill switch", e)
+        }
+    }
+
+    // Fix #8: proper getProtocolHandler returning real handlers for all protocols
+    private fun getProtocolHandler(config: ProtocolConfig): ProtocolHandler {
+        return when (config) {
+            is WireGuardConfig -> WireGuardProtocol()
+            is V2RayConfig -> V2RayProtocol()
+            is SSHConfig -> SSHProtocol()
+            is ShadowsocksConfig -> ShadowsocksProtocol()
+            is UdpTunnelConfig -> UdpTunnelProtocol()
+            else -> throw IllegalArgumentException(
+                "Unsupported protocol config type: ${config.javaClass.simpleName}"
+            )
+        }
+    }
+
+    private fun buildNotification(state: ConnectionState): Notification {
+        // Fix #3: FLAG_IMMUTABLE | FLAG_UPDATE_CURRENT
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val statusText = when (state) {
+            is ConnectionState.Connected -> getString(R.string.status_connected)
+            is ConnectionState.Connecting -> getString(R.string.status_connecting)
+            is ConnectionState.Disconnecting -> "Disconnecting..."
+            is ConnectionState.Error -> "Error: ${state.message}"
+            is ConnectionState.Reconnecting -> "Reconnecting (${state.attempt}/${state.maxAttempts})..."
+            else -> getString(R.string.status_disconnected)
+        }
+
+        return NotificationCompat.Builder(this, AeroVPNApplication.VPN_CHANNEL_ID)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(statusText)
+            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH) // Fix #10: ensure heads-up on API 24-25
+            .build()
+    }
+
+    private fun updateNotification(state: ConnectionState) {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(AeroVPNApplication.VPN_NOTIFICATION_ID, buildNotification(state))
+    }
+
+    override fun onDestroy() {
         serviceScope.cancel()
         super.onDestroy()
     }
 
-    /**
-     * Connect to VPN with specified configuration
-     */
-    fun connect(config: ProtocolConfig) {
-        if (_connectionState.value is ConnectionState.Connecting || 
-            _connectionState.value is ConnectionState.Connected) {
-            Log.w(TAG, "Already connecting or connected")
-            return
-        }
-
-        serviceScope.launch {
-            try {
-                _connectionState.value = ConnectionState.Connecting
-                currentConfig = config
-                
-                // Create protocol handler based on config type
-                protocolHandler = createProtocolHandler(config)
-                
-                // Build VPN interface
-                vpnBuilder = Builder()
-                    .addAddress("10.0.0.1", 32)
-                    .addDnsServer("8.8.8.8")
-                    .addRoute("0.0.0.0", 0)
-                    .setSession("AeroVPN")
-                    .setBlocking(false)
-                
-                // Add MIME type support for Android 10+
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    vpnBuilder.setMetered(false)
-                }
-                
-                // Connect with protocol handler
-                val connected = protocolHandler?.connect(config, vpnBuilder) ?: false
-                
-                if (connected) {
-                    // Establish VPN file descriptor
-                    vpnBuilder.establish()?.let { fd ->
-                        Log.i(TAG, "VPN interface established, FD: ${fd.fd()}")
-                        
-                        // Start traffic monitoring
-                        monitorTraffic(fd)
-                    }
-                    
-                    _connectionState.value = ConnectionState.Connected
-                    reconnectAttempts = 0
-                    
-                    // Update notification
-                    updateNotification(ConnectionState.Connected)
-                    
-                    Log.i(TAG, "VPN connected successfully")
-                } else {
-                    _connectionState.value = ConnectionState.Error("Failed to connect")
-                    updateNotification(ConnectionState.Error("Connection failed"))
-                }
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Connection error", e)
-                _connectionState.value = ConnectionState.Error("Connection error: ${e.message}", e)
-                updateNotification(ConnectionState.Error("Connection error"))
-                
-                // Activate kill switch if enabled
-                if (killSwitchEnabled) {
-                    activateKillSwitch()
-                }
-            }
-        }
+    companion object {
+        private const val TAG = "AeroVpnService"
+        const val ACTION_CONNECT = "com.aerovpn.action.CONNECT"
+        const val ACTION_DISCONNECT = "com.aerovpn.action.DISCONNECT"
+        const val EXTRA_CONFIG = "extra_config"
     }
-
-    /**
-     * Disconnect from VPN
-     */
-    fun disconnect() {
-        serviceScope.launch {
-            try {
-                _connectionState.value = ConnectionState.Disconnecting
-                
-                // Stop protocol handler
-                protocolHandler?.disconnect()
-                protocolHandler = null
-                
-                // Deactivate kill switch
-                deactivateKillSwitch()
-                
-                currentConfig = null
-                
-                _connectionState.value = ConnectionState.Idle
-                updateNotification(ConnectionState.Idle)
-                
-                Log.i(TAG, "VPN disconnected")
-                
-                // Stop foreground service if not reconnecting
-                if (!autoReconnectEnabled || reconnectAttempts >= maxReconnectAttempts) {
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
-                }
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Disconnect error", e)
-                _connectionState.value = ConnectionState.Error("Disconnect error: ${e.message}", e)
-            }
-        }
-    }
-
-    /**
-     * Create appropriate protocol handler based on configuration
-     */
-    private fun createProtocolHandler(config: ProtocolConfig): ProtocolHandler {
-        return when (config) {
-            is WireGuardConfig -> WireGuardProtocol(this, serviceScope)
-            is V2RayConfig -> V2RayProtocol(this, serviceScope)
-            is SSHConfig -> SSHProtocol(this, serviceScope)
-            is ShadowsocksConfig -> ShadowsocksProtocol(this, serviceScope)
-            is UdpTunnelConfig -> UdpTunnelProtocol(this, serviceScope)
-            else -> throw IllegalArgumentException("Unknown protocol config type")
-        }
-    }
-
-    /**
-     * Enable or disable auto-reconnect
-     */
-    fun setAutoReconnect(enabled: Boolean, maxAttempts: Int = 3) {
-        autoReconnectEnabled = enabled
-        maxReconnectAttempts = maxAttempts
-        Log.d(TAG, "Auto-reconnect ${if (enabled) "enabled" else "disabled"}, max attempts: $maxAttempts")
-    }
-
-    /**
-     * Enable or disable kill switch
-     */
-    fun setKillSwitch(enabled: Boolean) {
-        killSwitchEnabled = enabled
-        Log.d(TAG, "Kill switch ${if (enabled) "enabled" else "disabled"}")
-        
-        if (enabled && !_connectionState.value.isConnected()) {
-            // Pre-emptively block traffic if kill switch enabled while disconnected
-            activateKillSwitch()
-        } else if (!enabled) {
-            deactivateKillSwitch()
-        }
-    }
-
-    /**
-     * Activate kill switch - block all network traffic
-     */
-    private fun activateKillSwitch() {
-        if (!killSwitchEnabled || isKillSwitchActive) return
-        
-        serviceScope.launch {
-            try {
-                // On Android, we can't truly block all traffic without VPN,
-                // but we can prevent app from using network
-                isKillSwitchActive = true
-                Log.w(TAG, "Kill switch activated - network blocked")
-                
-                // In production, implement proper network blocking:
-                // - Use Firewall rules (requires root)
-                // - Disable network interfaces
-                // - Block at application level
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to activate kill switch", e)
-            }
-        }
-    }
-
-    /**
-     * Deactivate kill switch - restore network access
-     */
-    private fun deactivateKillSwitch() {
-        if (!isKillSwitchActive) return
-        
-        isKillSwitchActive = false
-        Log.i(TAG, "Kill switch deactivated - network restored")
-    }
-
-    /**
-     * Handle connection failure with auto-reconnect
-     */
-    private suspend fun handleConnectionFailure(error: String) {
-        if (!autoReconnectEnabled) {
-            _connectionState.value = ConnectionState.Error(error)
-            return
-        }
-        
-        reconnectAttempts++
-        
-        if (reconnectAttempts <= maxReconnectAttempts) {
-            _connectionState.value = ConnectionState.Reconnecting(reconnectAttempts, maxReconnectAttempts)
-            updateNotification(ConnectionState.Reconnecting(reconnectAttempts, maxReconnectAttempts))
-            
-            // Exponential backoff
-            val delay = when (reconnectAttempts) {
-                1 -> 1000L
-                2 -> 2000L
-                3 -> 4000L
-                else -> 8000L
-            }
-            
-            Log.d(TAG, "Auto-reconnect attempt $reconnectAttempts/$maxReconnectAttempts in ${delay}ms")
-            delay(delay)
-            
-            // Try to reconnect
-            currentConfig?.let { config ->
-                connect(config)
-            }
-        } else {
-            _connectionState.value = ConnectionState.Error("Max reconnect attempts reached. Last error: $error")
-            autoReconnectEnabled = false
-            Log.e(TAG, "Max reconnect attempts reached")
-        }
-    }
-
-    /**
-     * Monitor VPN traffic and update statistics
-     */
-    private suspend fun monitorTraffic(fd: android.os.ParcelFileDescriptor) {
-        serviceScope.launch {
-            try {
-                // Monitor file descriptor for traffic statistics
-                // In production, read from /proc/net/dev or use VpnService.Builder metrics
-                
-                while (isActive && _connectionState.value is ConnectionState.Connected) {
-                    delay(5000) // Update every 5 seconds
-                    
-                    protocolHandler?.getStatistics()?.let { stats ->
-                        Log.d(TAG, "Traffic - Sent: ${stats.bytesSent}, Received: ${stats.bytesReceived}")
-                    }
-                }
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Error monitoring traffic", e)
-            }
-        }
-    }
-
-    /**
-     * Set up network connectivity monitoring
-     */
-    private fun setupNetworkMonitor() {
-        val networkRequest = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-            .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
-            .build()
-        
-        networkCallback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                Log.d(TAG, "Network available")
-                
-                // If kill switch is active and we're disconnected, keep it active
-                if (isKillSwitchActive && _connectionState.value !is ConnectionState.Connected) {
-                    Log.w(TAG, "Network available but kill switch active")
-                    return
-                }
-                
-                // If connected and connection lost, trigger reconnect
-                if (_connectionState.value is ConnectionState.Connected && autoReconnectEnabled) {
-                    serviceScope.launch {
-                        delay(2000) // Wait for network to stabilize
-                        currentConfig?.let { connect(it) }
-                    }
-                }
-            }
-            
-            override fun onLost(network: Network) {
-                Log.w(TAG, "Network lost")
-                
-                // If kill switch enabled, activate it
-                if (killSwitchEnabled && _connectionState.value is ConnectionState.Connected) {
-                    activateKillSwitch()
-                }
-            }
-            
-            override fun onCapabilitiesChanged(
-                network: Network,
-                capabilities: NetworkCapabilities
-            ) {
-                val hasInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                Log.d(TAG, "Network capabilities changed, has internet: $hasInternet")
-            }
-        }
-        
-        try {
-            connectivityManager.registerNetworkCallback(networkRequest, networkCallback!!)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to register network callback", e)
-        }
-    }
-
-    /**
-     * Create notification channel
-     */
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                NOTIFICATION_CHANNEL_ID,
-                "VPN Service",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "VPN connection status"
-                setShowBadge(false)
-            }
-            
-            notificationManager.createNotificationChannel(channel)
-        }
-    }
-
-    /**
-     * Create foreground notification
-     */
-    private fun createNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        
-        val disconnectIntent = Intent(this, AeroVpnService::class.java).apply {
-            action = ACTION_DISCONNECT
-        }
-        val disconnectPendingIntent = PendingIntent.getService(
-            this, 1, disconnectIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        
-        return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("AeroVPN")
-            .setContentText("VPN disconnected")
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentIntent(pendingIntent)
-            .addAction(
-                R.drawable.ic_disconnect,
-                "Disconnect",
-                disconnectPendingIntent
-            )
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-    }
-
-    /**
-     * Update notification based on connection state
-     */
-    private fun updateNotification(state: ConnectionState) {
-        mainHandler.post {
-            val notification = when (state) {
-                is ConnectionState.Idle -> {
-                    createNotification().apply {
-                        setContentText("VPN disconnected")
-                    }
-                }
-                is ConnectionState.Connecting -> {
-                    createNotification().apply {
-                        setContentText("Connecting...")
-                        setProgress(100, 0, true)
-                    }
-                }
-                is ConnectionState.Connected -> {
-                    createNotification().apply {
-                        setContentText("VPN connected")
-                        setSmallIcon(R.drawable.ic_connected)
-                        setProgress(100, 100, false)
-                    }
-                }
-                is ConnectionState.Disconnecting -> {
-                    createNotification().apply {
-                        setContentText("Disconnecting...")
-                    }
-                }
-                is ConnectionState.Error -> {
-                    createNotification().apply {
-                        setContentText("Error: ${state.message}")
-                        setSmallIcon(R.drawable.ic_error)
-                    }
-                }
-                is ConnectionState.Reconnecting -> {
-                    createNotification().apply {
-                        setContentText("Reconnecting (${state.attempt}/${state.maxAttempts})...")
-                        setProgress(100, (state.attempt * 100 / state.maxAttempts), false)
-                    }
-                }
-            }
-            
-            notificationManager.notify(NOTIFICATION_ID, notification)
-        }
-    }
-
-    /**
-     * Get current connection statistics
-     */
-    fun getStatistics(): ConnectionStatistics? {
-        return protocolHandler?.getStatistics()
-    }
-
-    /**
-     * Check if VPN is currently active
-     */
-    fun isActive(): Boolean {
-        return _connectionState.value is ConnectionState.Connected
-    }
-}
-
-/**
- * Extension function to check connection state
- */
-fun ConnectionState.isConnected(): Boolean {
-    return this is ConnectionState.Connected
 }

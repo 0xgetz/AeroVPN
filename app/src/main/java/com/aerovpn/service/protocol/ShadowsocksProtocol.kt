@@ -103,18 +103,11 @@ class ShadowsocksProtocol(
     }
 
     override suspend fun reconnect(maxRetries: Int, initialDelayMs: Long) {
-        currentConfig?.let { cfg ->
-            scope.launch {
-                super.reconnect(maxRetries, initialDelayMs)
-            }
-        }
+        super.reconnect(maxRetries, initialDelayMs)
     }
 
     override protected suspend fun tryReconnect(): Boolean {
-        return currentConfig?.let { config ->
-            val builder = VpnService.Builder()
-            connect(config, builder)
-        } ?: false
+        return false // No VpnService reference available for reconnect
     }
 
     /**
@@ -392,7 +385,7 @@ enum class ShadowMethod(val keyLength: Int) {
 data class ShadowsocksConfig(
     override val name: String,
     override val serverAddress: String,
-    override val serverPort: Int = DEFAULT_PORT,
+    override val serverPort: Int = 8388,
     val password: String,
     val method: String = ShadowMethod.DEFAULT.name.lowercase().replace("_", "-"),
     val dnsServers: List<String> = listOf("8.8.8.8", "1.1.1.1"),

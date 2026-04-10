@@ -28,7 +28,7 @@ enum class SharingType {
 data class HotspotConfig(
     val ssid: String,
     val password: String,
-    val band: Int = WifiManager.WIFI_AP_BAND_2GHZ,
+    val band: Int = 0, // 0 = 2.4GHz band
     val channel: Int = 0,  // 0 = auto
     val maxClients: Int = 10,
     val hiddenSsid: Boolean = false,
@@ -138,7 +138,7 @@ object ShareConnectionTool {
                     }
                     SecurityType.WPA2_PSK -> {
                         allowedKeyManagement.set(android.net.wifi.WifiConfiguration.KeyMgmt.WPA_PSK)
-                        allowedPairwiseCiphers.set(android.net.wifi.WifiConfiguration.Pairwise.CCMP)
+                        allowedPairwiseCiphers.set(android.net.wifi.WifiConfiguration.PairwiseCipher.CCMP)
                         allowedGroupCiphers.set(android.net.wifi.WifiConfiguration.GroupCipher.CCMP)
                         allowedProtocols.set(android.net.wifi.WifiConfiguration.Protocol.RSN)
                     }
@@ -353,8 +353,8 @@ object ShareConnectionTool {
             val txStats = android.net.TrafficStats.getUidTxBytes(android.os.Process.myUid())
             
             DataUsage(
-                uploaded = txStats.takeUnless { it == android.net.TrafficStats.UNSUPPORTED } ?: 0,
-                downloaded = trafficStats.takeUnless { it == android.net.TrafficStats.UNSUPPORTED } ?: 0,
+                uploaded = txStats.takeUnless { it == android.net.TrafficStats.UNSUPPORTED.toLong() } ?: 0,
+                downloaded = trafficStats.takeUnless { it == android.net.TrafficStats.UNSUPPORTED.toLong() } ?: 0,
                 total = 0
             )
         } catch (e: Exception) {
@@ -374,14 +374,14 @@ object ShareConnectionTool {
 
     private suspend fun isHotspotCapable(context: Context): Boolean = withContext(Dispatchers.IO) {
         val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        return wifiManager.is5GHzBandSupported || wifiManager.isDualBandSupported
+        wifiManager.is5GHzBandSupported || wifiManager.isDualBandSupported
     }
 
     private suspend fun hasActiveVpnConnection(context: Context): Boolean = withContext(Dispatchers.IO) {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = connectivityManager.activeNetwork
         val capabilities = connectivityManager.getNetworkCapabilities(network)
-        return capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+        capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
     }
 }
 

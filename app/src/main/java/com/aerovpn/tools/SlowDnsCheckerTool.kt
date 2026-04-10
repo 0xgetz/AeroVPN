@@ -269,7 +269,7 @@ object SlowDnsCheckerTool {
         val qType = byteArrayOf(0x00, 0x01) // A record
         val qClass = byteArrayOf(0x00, 0x01) // IN class
         
-        return header + query.toByteArray() + qType + qClass
+        return header + query.filterIsInstance<Byte>().toByteArray() + qType + qClass
     }
 
     private fun calculateTunnelScore(responseTime: Long, packetLoss: Double): DnsTunnelScore {

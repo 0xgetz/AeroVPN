@@ -1,7 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
-    id 'org.jetbrains.kotlin.plugin.compose'
+    id 'com.google.devtools.ksp' // Fix #14: KSP for Room annotation processing
 }
 
 android {
@@ -40,12 +40,13 @@ android {
 
     compileOptions {
         // Use Java 17 for better performance
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true // Fix #15: enables Java 8+ APIs on older Android versions
+        sourceCompatibility JavaVersion.VERSION_1_8 // Fix #15: lowered for coreLibraryDesugaring compatibility
+        targetCompatibility JavaVersion.VERSION_1_8
     }
 
     kotlinOptions {
-        jvmTarget = '17'
+        jvmTarget = '1.8' // Fix #15: match sourceCompatibility
         // Enable compose compiler options
         freeCompilerArgs += [
             '-opt-in=androidx.compose.material3.ExperimentalMaterial3Api',
@@ -129,28 +130,35 @@ dependencies {
     // Room Database (if local storage needed)
     implementation 'androidx.room:room-runtime:2.6.1'
     implementation 'androidx.room:room-ktx:2.6.1'
-    annotationProcessor 'androidx.room:room-compiler:2.6.1'
+    ksp 'androidx.room:room-compiler:2.6.1' // Fix #14: replaced annotationProcessor with ksp
 
     // VPN Libraries
-    // WireGuard
-    implementation 'com.wireguard:wireguard:0.0.10'
+    // WireGuard - Fix #19: official WireGuard Android tunnel library
+    implementation 'com.wireguard.android:tunnel:1.0.20230705'
     
-    // JSCH for SSH
-    implementation 'com.jcraft:jsch:0.1.55'
+    // JSCH for SSH - Fix #16: upgraded from 0.1.55 to mwiede fork with security fixes
+    implementation 'com.github.mwiede:jsch:0.2.16'
     
-    // V2Ray core (via local AAR or build from source)
-    // implementation files('libs/v2ray-core.aar')
+    // V2Ray core - Fix #18: use tun2socks + v2ray-core via JitPack
+    implementation 'com.github.2dust:v2rayNG:1.8.19'
+    // Fallback: implementation files('libs/v2ray-core.aar')
     
     // Shadowsocks library
-    implementation 'com.github.shadowsocks:shadowsocks-libev:3.3.5'
+    // implementation 'com.github.shadowsocks:shadowsocks-libev:3.3.5' // not available on jitpack
 
     // Image Loading - Coil
     implementation 'io.coil-kt:coil-compose:2.5.0'
 
     // Utility libraries
     implementation 'androidx.preference:preference-ktx:1.2.1'
-    implementation 'com.google.accompanist:accompanist-systemuicontroller:0.33.2-alpha'
+    // Fix #17: removed accompanist-systemuicontroller — use WindowInsetsController native API instead
     implementation 'com.google.accompanist:accompanist-permissions:0.33.2-alpha'
+
+    // Fix #22: MultiDex support
+    implementation 'androidx.multidex:multidex:2.0.1'
+
+    // Fix #15: required for coreLibraryDesugaringEnabled
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 
     // Testing
     testImplementation 'junit:junit:4.13.2'

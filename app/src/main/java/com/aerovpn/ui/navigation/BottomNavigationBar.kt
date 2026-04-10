@@ -16,6 +16,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun BottomNavigationBar(

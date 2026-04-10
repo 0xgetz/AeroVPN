@@ -133,14 +133,11 @@ object IpHunterTool {
                     city = json.optString("city", ""),
                     latitude = json.optDouble("latitude").takeUnless { it == 0.0 },
                     longitude = json.optDouble("longitude").takeUnless { it == 0.0 },
-                    isp = json.optString("connection", JSONObject()).optString("isp", ""),
+                    isp = json.optJSONObject("connection")?.optString("isp", "") ?: "",
                     timezone = json.optString("time_zone", ""),
-                    mobile = json.optBoolean("connection", JSONObject())
-                        .optBoolean("mobile", false),
-                    proxy = json.optBoolean("connection", JSONObject())
-                        .optBoolean("proxy", false),
-                    hosting = json.optBoolean("connection", JSONObject())
-                        .optBoolean("hosting", false)
+                    mobile = json.optJSONObject("connection")?.optBoolean("mobile", false) ?: false,
+                    proxy = json.optJSONObject("connection")?.optBoolean("proxy", false) ?: false,
+                    hosting = json.optJSONObject("connection")?.optBoolean("hosting", false) ?: false
                 )
                 service.contains("myip.com") -> IpInfo(
                     ip = json.optString("ip", ""),

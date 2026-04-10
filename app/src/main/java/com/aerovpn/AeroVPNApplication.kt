@@ -1,23 +1,32 @@
 package com.aerovpn
 
 import android.app.Application
+import androidx.multidex.MultiDex
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import androidx.work.Configuration
-import androidx.work.WorkManager
 
 class AeroVPNApplication : Application(), Configuration.Provider {
+
+    // Fix #22: MultiDex support for large DEX method count
+    override fun attachBaseContext(base: android.content.Context) {
+        super.attachBaseContext(base)
+        MultiDex.install(this)
+    }
 
     override fun onCreate() {
         super.onCreate()
         instance = this
         createNotificationChannels()
-        initializeWorkManager()
+        // Fix #6: removed duplicate initializeWorkManager() call — WorkManager is already
+        // initialized via androidx.startup.InitializationProvider in AndroidManifest.xml,
+        // which uses workManagerConfiguration below. Calling WorkManager.initialize() again
+        // here would cause an IllegalStateException on Android 12+.
     }
 
-    override fun getWorkManagerConfiguration(): Configuration {
+    override val workManagerConfiguration: Configuration get() {
         return Configuration.Builder()
             .setMinimumLoggingLevel(android.util.Log.INFO)
             .build()
@@ -41,10 +50,6 @@ class AeroVPNApplication : Application(), Configuration.Provider {
             
             notificationManager.createNotificationChannel(vpnChannel)
         }
-    }
-
-    private fun initializeWorkManager() {
-        WorkManager.initialize(this, workManagerConfiguration)
     }
 
     companion object {

@@ -235,11 +235,7 @@ fun ServerItem(
                     
                     if (server.isPremium) {
                         Spacer(modifier = Modifier.width(8.dp))
-                        Badge(
-                            colors = BadgeDefaults.badgeColors(
-                                containerColor = MaterialTheme.colorScheme.tertiary
-                            )
-                        ) {
+                        Badge() {
                             Text(
                                 text = "PRO",
                                 fontSize = 10.sp,
