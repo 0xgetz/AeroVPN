@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Binder
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.aerovpn.AeroVPNApplication
@@ -15,6 +16,16 @@ import com.aerovpn.service.protocol.ConnectionState
 import com.aerovpn.service.protocol.ProtocolConfig
 import com.aerovpn.service.protocol.ProtocolHandler
 import com.aerovpn.service.protocol.ProtocolType
+import com.aerovpn.service.protocol.SSHConfig
+import com.aerovpn.service.protocol.SSHProtocol
+import com.aerovpn.service.protocol.ShadowsocksConfig
+import com.aerovpn.service.protocol.ShadowsocksProtocol
+import com.aerovpn.service.protocol.UdpTunnelConfig
+import com.aerovpn.service.protocol.UdpTunnelProtocol
+import com.aerovpn.service.protocol.V2RayConfig
+import com.aerovpn.service.protocol.V2RayProtocol
+import com.aerovpn.service.protocol.WireGuardConfig
+import com.aerovpn.service.protocol.WireGuardProtocol
 import com.aerovpn.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,8 +60,27 @@ class AeroVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> {
-                val config = intent.getSerializableExtra(EXTRA_CONFIG) as? ProtocolConfig
+                // Fix #7: type-safe getSerializableExtra for API 33+
+                val config: ProtocolConfig? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getSerializableExtra(EXTRA_CONFIG, ProtocolConfig::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getSerializableExtra(EXTRA_CONFIG) as? ProtocolConfig
+                }
                 if (config != null) {
+                    // Fix #2: startForeground with foregroundServiceType connectedDevice
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        startForeground(
+                            AeroVPNApplication.VPN_NOTIFICATION_ID,
+                            buildNotification(ConnectionState.Connecting),
+                            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                        )
+                    } else {
+                        startForeground(
+                            AeroVPNApplication.VPN_NOTIFICATION_ID,
+                            buildNotification(ConnectionState.Connecting)
+                        )
+                    }
                     connect(config)
                 }
             }
@@ -58,10 +88,19 @@ class AeroVpnService : VpnService() {
                 disconnect()
             }
             else -> {
-                startForeground(
-                    AeroVPNApplication.VPN_NOTIFICATION_ID,
-                    buildNotification(ConnectionState.Idle)
-                )
+                // Fix #2: startForeground with foregroundServiceType connectedDevice
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(
+                        AeroVPNApplication.VPN_NOTIFICATION_ID,
+                        buildNotification(ConnectionState.Idle),
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    )
+                } else {
+                    startForeground(
+                        AeroVPNApplication.VPN_NOTIFICATION_ID,
+                        buildNotification(ConnectionState.Idle)
+                    )
+                }
             }
         }
         return START_STICKY
@@ -73,7 +112,7 @@ class AeroVpnService : VpnService() {
             updateNotification(ConnectionState.Connecting)
 
             try {
-                val handler = getProtocolHandler(config.javaClass.simpleName)
+                val handler = getProtocolHandler(config)
                 activeProtocolHandler = handler
 
                 val vpnBuilder = Builder()
@@ -131,29 +170,27 @@ class AeroVpnService : VpnService() {
         }
     }
 
-    private fun getProtocolHandler(configType: String): ProtocolHandler {
-        // Return a no-op handler stub; real implementations are registered per protocol
-        return object : com.aerovpn.service.protocol.BaseProtocolHandler() {
-            override val protocolType = ProtocolType.UDP_TUNNEL
-            override val connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
-
-            override suspend fun connect(
-                config: ProtocolConfig,
-                vpnService: android.net.VpnService.Builder
-            ): Boolean = false
-
-            override suspend fun disconnect() {}
-
-            override suspend fun tryReconnect(): Boolean = false
+    // Fix #8: proper getProtocolHandler returning real handlers for all protocols
+    private fun getProtocolHandler(config: ProtocolConfig): ProtocolHandler {
+        return when (config) {
+            is WireGuardConfig -> WireGuardProtocol()
+            is V2RayConfig -> V2RayProtocol()
+            is SSHConfig -> SSHProtocol()
+            is ShadowsocksConfig -> ShadowsocksProtocol()
+            is UdpTunnelConfig -> UdpTunnelProtocol()
+            else -> throw IllegalArgumentException(
+                "Unsupported protocol config type: ${config.javaClass.simpleName}"
+            )
         }
     }
 
     private fun buildNotification(state: ConnectionState): Notification {
+        // Fix #3: FLAG_IMMUTABLE | FLAG_UPDATE_CURRENT
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
         val statusText = when (state) {
