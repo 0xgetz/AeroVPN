@@ -1,6 +1,7 @@
 package com.aerovpn
 
 import android.app.Application
+import androidx.multidex.MultiDex
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -8,6 +9,12 @@ import android.os.Build
 import androidx.work.Configuration
 
 class AeroVPNApplication : Application(), Configuration.Provider {
+
+    // Fix #22: MultiDex support for large DEX method count
+    override fun attachBaseContext(base: android.content.Context) {
+        super.attachBaseContext(base)
+        MultiDex.install(this)
+    }
 
     override fun onCreate() {
         super.onCreate()
