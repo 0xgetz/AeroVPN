@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    id 'com.google.devtools.ksp' // Fix #14: KSP for Room annotation processing
 }
 
 android {
@@ -39,12 +40,13 @@ android {
 
     compileOptions {
         // Use Java 17 for better performance
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true // Fix #15: enables Java 8+ APIs on older Android versions
+        sourceCompatibility JavaVersion.VERSION_1_8 // Fix #15: lowered for coreLibraryDesugaring compatibility
+        targetCompatibility JavaVersion.VERSION_1_8
     }
 
     kotlinOptions {
-        jvmTarget = '17'
+        jvmTarget = '1.8' // Fix #15: match sourceCompatibility
         // Enable compose compiler options
         freeCompilerArgs += [
             '-opt-in=androidx.compose.material3.ExperimentalMaterial3Api',
@@ -128,7 +130,7 @@ dependencies {
     // Room Database (if local storage needed)
     implementation 'androidx.room:room-runtime:2.6.1'
     implementation 'androidx.room:room-ktx:2.6.1'
-    annotationProcessor 'androidx.room:room-compiler:2.6.1'
+    ksp 'androidx.room:room-compiler:2.6.1' // Fix #14: replaced annotationProcessor with ksp
 
     // VPN Libraries
     // WireGuard
@@ -151,6 +153,9 @@ dependencies {
     implementation 'androidx.preference:preference-ktx:1.2.1'
     implementation 'com.google.accompanist:accompanist-systemuicontroller:0.33.2-alpha'
     implementation 'com.google.accompanist:accompanist-permissions:0.33.2-alpha'
+
+    // Fix #15: required for coreLibraryDesugaringEnabled
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 
     // Testing
     testImplementation 'junit:junit:4.13.2'
