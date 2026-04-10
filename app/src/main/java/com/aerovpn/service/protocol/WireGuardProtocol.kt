@@ -28,12 +28,19 @@ class WireGuardProtocol : BaseProtocolHandler() {
             Log.d(TAG, "Connecting to WireGuard endpoint: ${config.serverAddress}:${config.serverPort}")
 
             // Configure VPN interface
-            vpnService
+            // Fix #5: establish() returns nullable ParcelFileDescriptor — must null-check
+            val vpnInterface = vpnService
                 .setSession("AeroVPN-WireGuard")
                 .addAddress("10.0.0.2", 24)
                 .addDnsServer("1.1.1.1")
                 .addRoute("0.0.0.0", 0)
                 .establish()
+
+            if (vpnInterface == null) {
+                Log.e(TAG, "WireGuard: establish() returned null — VPN permission not granted or revoked")
+                _connectionState.value = ConnectionState.Error("VPN permission not granted")
+                return false
+            }
 
             isActive = true
             connectionStartTime = System.currentTimeMillis()
