@@ -161,18 +161,11 @@
             </intent-filter>
         </receiver>
 
-        <!-- Network State Receiver - Handle connectivity changes -->
-        <receiver
-            android:name=".receiver.NetworkStateReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
-                <action android:name="android.net.wifi.WIFI_STATE_CHANGED" />
-                <action android:name="android.net.wifi.STATE_CHANGE" />
-                <action android:name="android.net.wifi.RSSI_CHANGED" />
-            </intent-filter>
-        </receiver>
+        <!-- Network State Receiver - PROGRAMMATICALLY registered in AeroVpnService.
+             CONNECTIVITY_CHANGE is deprecated since API 28 and not reliably delivered
+             to manifest-declared receivers on API 24+. The receiver also handles
+             SCREEN_ON/OFF which can ONLY be received by programmatic receivers.
+             Do NOT re-add a manifest entry for this receiver. -->
 
         <!-- Package Update Receiver - Handle app updates -->
         <receiver
