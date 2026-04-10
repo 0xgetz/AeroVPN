@@ -1,25 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Fix #13: Corrected data-extraction-rules.xml
+    - Added disableIfNoEncryptionCapabilities="true" for cloud-backup to prevent
+      backup on unencrypted transport (security best practice for VPN apps)
+    - Excluded credential and key files from both cloud-backup and device-transfer
+    - Follows Android 12+ data extraction rules format (API 31+)
+-->
 <data-extraction-rules>
-    <cloud-backup>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
         <!-- Include app preferences -->
         <include
             domain="sharedpref"
             path="." />
-        
+
         <!-- Include database -->
         <include
             domain="database"
             path="." />
-        
-        <!-- Exclude sensitive data -->
+
+        <!-- Exclude sensitive data: device info, credentials, VPN keys -->
         <exclude
             domain="sharedpref"
             path="device_info.xml" />
         <exclude
+            domain="sharedpref"
+            path="vpn_credentials.xml" />
+        <exclude
             domain="file"
             path="." />
+        <exclude
+            domain="external"
+            path="." />
     </cloud-backup>
-    
+
     <!-- Device transfer rules -->
     <device-transfer>
         <include
@@ -27,6 +40,13 @@
             path="." />
         <include
             domain="database"
+            path="." />
+        <!-- Exclude credentials from device transfer as well -->
+        <exclude
+            domain="sharedpref"
+            path="vpn_credentials.xml" />
+        <exclude
+            domain="file"
             path="." />
     </device-transfer>
 </data-extraction-rules>
