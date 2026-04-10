@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import androidx.work.Configuration
-import androidx.work.WorkManager
 
 class AeroVPNApplication : Application(), Configuration.Provider {
 
@@ -14,7 +13,10 @@ class AeroVPNApplication : Application(), Configuration.Provider {
         super.onCreate()
         instance = this
         createNotificationChannels()
-        initializeWorkManager()
+        // Fix #6: removed duplicate initializeWorkManager() call — WorkManager is already
+        // initialized via androidx.startup.InitializationProvider in AndroidManifest.xml,
+        // which uses workManagerConfiguration below. Calling WorkManager.initialize() again
+        // here would cause an IllegalStateException on Android 12+.
     }
 
     override val workManagerConfiguration: Configuration get() {
@@ -41,10 +43,6 @@ class AeroVPNApplication : Application(), Configuration.Provider {
             
             notificationManager.createNotificationChannel(vpnChannel)
         }
-    }
-
-    private fun initializeWorkManager() {
-        WorkManager.initialize(this, workManagerConfiguration)
     }
 
     companion object {
