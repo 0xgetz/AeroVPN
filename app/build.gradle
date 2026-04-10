@@ -133,15 +133,15 @@ dependencies {
     ksp 'androidx.room:room-compiler:2.6.1' // Fix #14: replaced annotationProcessor with ksp
 
     // VPN Libraries
-    // WireGuard
-    // implementation 'com.wireguard:wireguard:0.0.10' // not available
-    // implementation 'com.wireguard.android:tunnel:1.0.20230705' // not available
+    // WireGuard - Fix #19: official WireGuard Android tunnel library
+    implementation 'com.wireguard.android:tunnel:1.0.20230705'
     
-    // JSCH for SSH
-    implementation 'com.jcraft:jsch:0.1.55'
+    // JSCH for SSH - Fix #16: upgraded from 0.1.55 to mwiede fork with security fixes
+    implementation 'com.github.mwiede:jsch:0.2.16'
     
-    // V2Ray core (via local AAR or build from source)
-    // implementation files('libs/v2ray-core.aar')
+    // V2Ray core - Fix #18: use tun2socks + v2ray-core via JitPack
+    implementation 'com.github.2dust:v2rayNG:1.8.19'
+    // Fallback: implementation files('libs/v2ray-core.aar')
     
     // Shadowsocks library
     // implementation 'com.github.shadowsocks:shadowsocks-libev:3.3.5' // not available on jitpack
@@ -151,8 +151,11 @@ dependencies {
 
     // Utility libraries
     implementation 'androidx.preference:preference-ktx:1.2.1'
-    implementation 'com.google.accompanist:accompanist-systemuicontroller:0.33.2-alpha'
+    // Fix #17: removed accompanist-systemuicontroller — use WindowInsetsController native API instead
     implementation 'com.google.accompanist:accompanist-permissions:0.33.2-alpha'
+
+    // Fix #22: MultiDex support
+    implementation 'androidx.multidex:multidex:2.0.1'
 
     // Fix #15: required for coreLibraryDesugaringEnabled
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
