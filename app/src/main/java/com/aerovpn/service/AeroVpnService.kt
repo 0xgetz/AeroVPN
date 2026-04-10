@@ -42,6 +42,7 @@ import kotlinx.coroutines.launch
 class AeroVpnService : VpnService() {
 
     private val binder = LocalBinder()
+    // Fix #23: SupervisorJob ensures child coroutine failures don't cancel the whole scope
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
@@ -157,10 +158,12 @@ class AeroVpnService : VpnService() {
     }
 
     fun activateKillSwitch() {
-        // Kill switch: block all non-tunnel traffic using VpnService.Builder.setBlocking(true)
+        // Fix #20: setBlocking(true) requires API 29+ — guard with SDK version check
         try {
             val builder = Builder()
-            builder.setBlocking(true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                builder.setBlocking(true)
+            }
             builder.setSession("AeroVPN-KillSwitch")
             builder.addAddress("10.0.0.2", 24)
             builder.addRoute("0.0.0.0", 0)
