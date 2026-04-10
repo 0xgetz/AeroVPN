@@ -208,6 +208,7 @@ class AeroVpnService : VpnService() {
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH) // Fix #10: ensure heads-up on API 24-25
             .build()
     }
 
