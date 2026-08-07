@@ -215,27 +215,31 @@ class WireGuardProtocol(
 
     private fun tryGoBackend(config: WireGuardConfig, pfd: ParcelFileDescriptor): Boolean {
         return try {
-            // WireGuard-Go backend — load via System.loadLibrary if bundled
-            val wgClass = Class.forName("com.wireguard.android.backend.GoBackend")
-            val wgInstance = wgClass.getDeclaredConstructor(android.content.Context::class.java)
-                .newInstance(vpnService)
+            // H3 FIX: wgTurnOn is a STATIC native method on WireGuardGo
+            // (com.wireguard.android:tunnel), not an instance method on
+            // GoBackend. The old reflection targeted GoBackend and always
+            // failed, so WireGuard could never connect. WireGuardGo creates the
+            // backend's UDP socket inside wireguard-go and returns a handle.
+            val wgGoClass = Class.forName("com.wireguard.android.backend.WireGuardGo")
 
             // Build the wg settings string (userspace WireGuard format)
             val settings = buildWgSettings(config)
 
-            val turnOnMethod = wgClass.getMethod("wgTurnOn", String::class.java, Int::class.java, String::class.java)
-            val handle = turnOnMethod.invoke(wgInstance, "wg0", pfd.fd, settings) as Int
+            val turnOnMethod = wgGoClass.getMethod(
+                "wgTurnOn", String::class.java, Int::class.java, String::class.java
+            )
+            val handle = turnOnMethod.invoke(null, "wg0", pfd.fd, settings) as Int
             tunnelHandle = handle
 
             if (handle < 0) {
-                Log.e(TAG, "GoBackend wgTurnOn failed with handle=$handle")
+                Log.e(TAG, "WireGuardGo wgTurnOn failed with handle=$handle")
                 return false
             }
 
             Log.i(TAG, "WireGuard GoBackend started, handle=$handle")
             true
         } catch (e: ClassNotFoundException) {
-            Log.w(TAG, "GoBackend class not found — falling back to process mode")
+            Log.w(TAG, "WireGuardGo class not found — falling back to process mode")
             false
         } catch (e: Exception) {
             Log.w(TAG, "GoBackend start failed: ${e.message} — falling back to process mode")
@@ -292,6 +296,11 @@ class WireGuardProtocol(
     private fun buildWgSettings(config: WireGuardConfig): String = buildString {
         appendLine("private_key=${config.privateKey}")
         appendLine("listen_port=${config.listenPort ?: 0}")
+        // H3 FIX: a nonzero fwmark makes wireguard-go set SO_MARK on its
+        // endpoint socket. Android's VpnService policy routing (fwmark-based)
+        // then sends marked packets outside the tun — without this the endpoint
+        // traffic loops back through the VPN and the tunnel never connects.
+        appendLine("fwmark=0x1a44")
         config.peers.forEach { peer ->
             appendLine("public_key=${peer.publicKey}")
             if (!peer.preSharedKey.isNullOrBlank()) appendLine("preshared_key=${peer.preSharedKey}")
@@ -334,11 +343,11 @@ class WireGuardProtocol(
     private fun cleanup() {
         isActive = false
 
-        // Stop GoBackend
+        // Stop GoBackend (static WireGuardGo.wgTurnOff — matches tryGoBackend)
         if (tunnelHandle >= 0) {
             try {
-                val wgClass = Class.forName("com.wireguard.android.backend.GoBackend")
-                wgClass.getMethod("wgTurnOff", Int::class.java)
+                val wgGoClass = Class.forName("com.wireguard.android.backend.WireGuardGo")
+                wgGoClass.getMethod("wgTurnOff", Int::class.java)
                     .invoke(null, tunnelHandle)
                 Log.d(TAG, "GoBackend stopped")
             } catch (_: Exception) {}

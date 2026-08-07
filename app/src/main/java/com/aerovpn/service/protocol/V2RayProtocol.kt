@@ -227,6 +227,11 @@ class V2RayProtocol(
                     binaryFile.setExecutable(true)
                 }
 
+                // H3 note: the Xray subprocess owns its sockets, which cannot be
+                // protect()ed from this process, so its outbound connection to the
+                // server is routed through the tun. A complete fix requires running
+                // the core in-process (libv2ray) with a protected socket factory or
+                // fwmark-based routing rules.
                 // 3. Launch Xray with the config file
                 val process = ProcessBuilder(
                     binaryFile.absolutePath,

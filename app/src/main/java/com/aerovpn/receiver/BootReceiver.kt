@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import com.aerovpn.service.AeroVpnService
 
 /**
  * BroadcastReceiver that handles BOOT_COMPLETED events to auto-start VPN service
@@ -28,33 +29,29 @@ class BootReceiver : BroadcastReceiver() {
         // Check if auto-connect on boot is enabled in SharedPreferences
         val prefs = context.getSharedPreferences("aerovpn_prefs", Context.MODE_PRIVATE)
         val autoConnectOnBoot = prefs.getBoolean("auto_connect_on_boot", false)
-        
+
+        // M2 FIX: hand off to the service, which restores the full config it
+        // persisted on the last connect(). The old code sent a custom
+        // ACTION_START_VPN with server_id/protocol extras that AeroVpnService
+        // never handled, so boot auto-connect was dead code.
         if (autoConnectOnBoot) {
-            val lastServerId = prefs.getString("last_server_id", null)
-            val lastProtocol = prefs.getString("last_protocol", null)
-            
-            if (lastServerId != null && lastProtocol != null) {
-                // Start VPN service with saved configuration
-                val vpnIntent = Intent(context, Class.forName("com.aerovpn.service.AeroVpnService"))
-                vpnIntent.action = "com.aerovpn.ACTION_START_VPN"
-                vpnIntent.putExtra("server_id", lastServerId)
-                vpnIntent.putExtra("protocol", lastProtocol)
-                
-                try {
-                    // Fix: startForegroundService() was added in API 26 (Android 8.0).
-                    // Calling it unconditionally throws NoSuchMethodError on Android 7.x
-                    // (API 24/25), crashing the app. Fall back to startService() there —
-                    // AeroVpnService calls startForeground() itself on those versions.
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        context.startForegroundService(vpnIntent)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        context.startService(vpnIntent)
-                    }
-                } catch (e: Exception) {
-                    // Service may not start in locked boot state
-                    e.printStackTrace()
+            val vpnIntent = Intent(context, AeroVpnService::class.java)
+            vpnIntent.action = AeroVpnService.ACTION_RESTORE
+
+            try {
+                // Fix: startForegroundService() was added in API 26 (Android 8.0).
+                // Calling it unconditionally throws NoSuchMethodError on Android 7.x
+                // (API 24/25), crashing the app. Fall back to startService() there —
+                // AeroVpnService calls startForeground() itself on those versions.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(vpnIntent)
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.startService(vpnIntent)
                 }
+            } catch (e: Exception) {
+                // Service may not start in locked boot state
+                e.printStackTrace()
             }
         }
     }

@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import com.aerovpn.service.AeroVpnService
 
 /**
  * BroadcastReceiver that handles app update events.
@@ -26,12 +27,16 @@ class PackageUpdateReceiver : BroadcastReceiver() {
     private fun handlePackageUpdate(context: Context) {
         val prefs = context.getSharedPreferences("aerovpn_prefs", Context.MODE_PRIVATE)
         val wasConnected = prefs.getBoolean("vpn_was_connected", false)
-        
+
+        // M2 FIX: AeroVpnService owns the vpn_was_connected flag (set true on
+        // connect, false on user disconnect) and restores the persisted config
+        // when this canonical ACTION_RESTORE is received. The old code sent an
+        // unhandled ACTION_RESTORE_CONNECTION and cleared the flag here, which
+        // fought the service over its own state.
         if (wasConnected) {
-            // Restore VPN connection after update
-            val vpnIntent = Intent(context, Class.forName("com.aerovpn.service.AeroVpnService"))
-            vpnIntent.action = "com.aerovpn.ACTION_RESTORE_CONNECTION"
-            
+            val vpnIntent = Intent(context, AeroVpnService::class.java)
+            vpnIntent.action = AeroVpnService.ACTION_RESTORE
+
             try {
                 // Fix: startForegroundService() was added in API 26 (Android 8.0).
                 // Calling it unconditionally throws NoSuchMethodError on Android 7.x
@@ -47,8 +52,5 @@ class PackageUpdateReceiver : BroadcastReceiver() {
                 e.printStackTrace()
             }
         }
-        
-        // Clear the flag
-        prefs.edit().putBoolean("vpn_was_connected", false).apply()
     }
 }

@@ -1,5 +1,6 @@
 package com.aerovpn.ui.screens
 
+import android.content.Context
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -14,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,6 +52,17 @@ fun SettingsScreen(
     var autoReconnectEnabled by remember { mutableStateOf(true) }
     var showProtocolDialog by remember { mutableStateOf(false) }
     var selectedProtocol by remember { mutableStateOf("Auto") }
+
+    // M2: persisted auto-connect-on-boot setting (same prefs file the
+    // BootReceiver reads: "aerovpn_prefs" / "auto_connect_on_boot").
+    val settingsContext = LocalContext.current
+    var autoConnectOnBoot by remember {
+        mutableStateOf(
+            settingsContext
+                .getSharedPreferences("aerovpn_prefs", Context.MODE_PRIVATE)
+                .getBoolean("auto_connect_on_boot", false)
+        )
+    }
 
     if (showProtocolDialog) {
         ProtocolSelectionDialog(
@@ -134,6 +147,23 @@ fun SettingsScreen(
                     icon = Icons.Default.Refresh,
                     checked = autoReconnectEnabled,
                     onCheckedChange = { autoReconnectEnabled = it }
+                )
+            }
+
+            item {
+                SettingsToggleItem(
+                    title = "Auto Connect on Boot",
+                    description = "Reconnect to the last server when the device starts up",
+                    icon = Icons.Default.PhoneAndroid,
+                    checked = autoConnectOnBoot,
+                    onCheckedChange = {
+                        autoConnectOnBoot = it
+                        settingsContext
+                            .getSharedPreferences("aerovpn_prefs", Context.MODE_PRIVATE)
+                            .edit()
+                            .putBoolean("auto_connect_on_boot", it)
+                            .apply()
+                    }
                 )
             }
 

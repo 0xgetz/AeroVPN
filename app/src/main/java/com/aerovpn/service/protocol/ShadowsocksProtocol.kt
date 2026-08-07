@@ -194,8 +194,14 @@ class ShadowsocksProtocol(
      */
     private fun verifyServerReachable(config: ShadowsocksConfig) {
         Log.d(TAG, "Probing ${config.serverAddress}:${config.serverPort}")
-        Socket().use { socket ->
-            socket.connect(
+        val socket = Socket()
+        // H3 FIX: protect the probe socket so its packets bypass the tun
+        // interface — never rely on "runs before establish()" ordering.
+        if (!vpnService.protect(socket)) {
+            Log.w(TAG, "Failed to protect probe socket — possible routing loop")
+        }
+        socket.use {
+            it.connect(
                 InetSocketAddress(config.serverAddress, config.serverPort),
                 CONNECT_TIMEOUT_MS
             )
@@ -267,6 +273,10 @@ class ShadowsocksProtocol(
 
                 if (!binary.canExecute()) binary.setExecutable(true)
 
+                // H3 note: the ss-local subprocess owns its sockets, which cannot
+                // be protect()ed from this process, so its connections to the server
+                // will be routed through the tun. A complete fix needs an in-process
+                // core with a protected socket factory or fwmark-based routing rules.
                 val process = ProcessBuilder(
                     binary.absolutePath,
                     "-c", configFile.absolutePath,

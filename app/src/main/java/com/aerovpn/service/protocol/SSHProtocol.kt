@@ -213,6 +213,11 @@ class SSHProtocol(
 
         val session = jsch.getSession(config.username, config.serverAddress, config.serverPort)
 
+        // H3 FIX: JSch creates its own sockets internally; hand it a factory that
+        // returns VpnService.protect()ed sockets so the SSH control connection
+        // (and keepalives) bypass the tun interface instead of looping through it.
+        session.setSocketFactory(ProtectedSocketFactory())
+
         // Session properties
         val props = Properties()
         if (config.hostKey == null) {
@@ -279,6 +284,43 @@ class SSHProtocol(
         } catch (_: Exception) {}
 
         currentConfig = null
+    }
+
+    // -------------------------------------------------------------------------
+    // H3: protected socket factory
+    // -------------------------------------------------------------------------
+
+    /**
+     * SocketFactory that marks every socket with [VpnService.protect] before
+     * JSch connects, so SSH control traffic bypasses the tun interface
+     * (prevents routing loops on Android 7-12).
+     */
+    private inner class ProtectedSocketFactory : com.jcraft.jsch.SocketFactory {
+
+        override fun createSocket(host: String, port: Int): Socket {
+            val socket = Socket()
+            if (!vpnService.protect(socket)) {
+                Log.w(TAG, "Failed to protect SSH socket — possible routing loop")
+            }
+            return socket
+        }
+
+        override fun createSocket(
+            host: String,
+            port: Int,
+            clientHost: InetAddress,
+            clientPort: Int
+        ): Socket {
+            val socket = Socket()
+            if (!vpnService.protect(socket)) {
+                Log.w(TAG, "Failed to protect SSH socket — possible routing loop")
+            }
+            return socket
+        }
+
+        override fun getInputStream(socket: Socket): java.io.InputStream = socket.getInputStream()
+
+        override fun getOutputStream(socket: Socket): java.io.OutputStream = socket.getOutputStream()
     }
 }
 
