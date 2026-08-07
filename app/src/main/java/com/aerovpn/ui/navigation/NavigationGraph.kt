@@ -7,6 +7,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.aerovpn.ui.PermissionUiState
 import com.aerovpn.ui.screens.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -20,7 +21,12 @@ import androidx.compose.material3.Text
 fun NavigationGraph(
     navController: NavHostController,
     modifier: Modifier = Modifier,
-    startDestination: String = NavigationItem.Home.route
+    startDestination: String = NavigationItem.Home.route,
+    permissionUi: PermissionUiState = PermissionUiState(),
+    onRequestNotifications: () -> Unit = {},
+    onRequestBluetooth: () -> Unit = {},
+    onOpenAppSettings: () -> Unit = {},
+    onOpenNotificationSettings: () -> Unit = {}
 ) {
     NavHost(
         navController = navController,
@@ -100,7 +106,12 @@ fun NavigationGraph(
                 },
                 onBackClick = {
                     navController.popBackStack()
-                }
+                },
+                permissionUi = permissionUi,
+                onRequestNotifications = onRequestNotifications,
+                onRequestBluetooth = onRequestBluetooth,
+                onOpenAppSettings = onOpenAppSettings,
+                onOpenNotificationSettings = onOpenNotificationSettings
             )
         }
 

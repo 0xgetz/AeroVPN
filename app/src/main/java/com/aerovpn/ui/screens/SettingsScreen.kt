@@ -1,5 +1,6 @@
 package com.aerovpn.ui.screens
 
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,6 +17,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.aerovpn.ui.PermissionUiState
 
 data class SettingsItem(
     val id: String,
@@ -37,7 +39,12 @@ enum class SettingsItemType {
 fun SettingsScreen(
     darkThemeEnabled: Boolean,
     onDarkThemeToggle: (Boolean) -> Unit,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    permissionUi: PermissionUiState = PermissionUiState(),
+    onRequestNotifications: () -> Unit = {},
+    onRequestBluetooth: () -> Unit = {},
+    onOpenAppSettings: () -> Unit = {},
+    onOpenNotificationSettings: () -> Unit = {}
 ) {
     var killSwitchEnabled by remember { mutableStateOf(false) }
     var autoReconnectEnabled by remember { mutableStateOf(true) }
@@ -143,6 +150,39 @@ fun SettingsScreen(
                     checked = darkThemeEnabled,
                     onCheckedChange = onDarkThemeToggle
                 )
+            }
+
+            // Permissions Section
+            item {
+                SettingsSectionTitle("Permissions")
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                item {
+                    PermissionStatusRow(
+                        title = "Notifications",
+                        description = "Shows VPN connection status in the notification bar",
+                        icon = Icons.Default.Notifications,
+                        granted = permissionUi.notificationsGranted,
+                        canAsk = permissionUi.notificationsCanAsk,
+                        onAllowClick = onRequestNotifications,
+                        onOpenSettingsClick = onOpenNotificationSettings
+                    )
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                item {
+                    PermissionStatusRow(
+                        title = "Nearby Devices",
+                        description = "Bluetooth access for connection sharing",
+                        icon = Icons.Default.Bluetooth,
+                        granted = permissionUi.bluetoothGranted,
+                        canAsk = permissionUi.bluetoothCanAsk,
+                        onAllowClick = onRequestBluetooth,
+                        onOpenSettingsClick = onOpenAppSettings
+                    )
+                }
             }
 
             // Privacy Section
@@ -358,6 +398,100 @@ fun SettingsToggleItem(
                     checkedTrackColor = MaterialTheme.colorScheme.primary
                 )
             )
+        }
+    }
+}
+
+/**
+ * A settings row that shows the live status of one runtime permission and lets
+ * the user request it ("Allow"), or jump to system settings when the dialog can
+ * no longer be shown ("Settings").
+ */
+@Composable
+fun PermissionStatusRow(
+    title: String,
+    description: String,
+    icon: ImageVector,
+    granted: Boolean,
+    canAsk: Boolean,
+    onAllowClick: () -> Unit,
+    onOpenSettingsClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = description,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = when {
+                        granted -> "Allowed"
+                        canAsk -> "Not granted"
+                        else -> "Permanently denied"
+                    },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = when {
+                        granted -> Color(0xFF4CAF50)
+                        canAsk -> Color(0xFFFF9800)
+                        else -> MaterialTheme.colorScheme.error
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            when {
+                granted -> {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Allowed",
+                        tint = Color(0xFF4CAF50),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                canAsk -> {
+                    TextButton(onClick = onAllowClick) {
+                        Text("Allow")
+                    }
+                }
+                else -> {
+                    TextButton(onClick = onOpenSettingsClick) {
+                        Text("Settings")
+                    }
+                }
+            }
         }
     }
 }

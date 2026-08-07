@@ -3,69 +3,44 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!-- ==================================================================
-         ESSENTIAL VPN AND NETWORK PERMISSIONS
+         PERMISSIONS
          ================================================================== -->
-    
+
     <!-- Core network access -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- WifiManager status + hotspot reflection used by ShareConnectionTool -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- USB tethering (ConnectivityManager.setUsbTethering) in ShareConnectionTool -->
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
-    
+
     <!-- VPN Service binding - REQUIRED for any VPN app -->
     <uses-permission android:name="android.permission.BIND_VPN_SERVICE" />
-    
+
     <!-- Foreground service for persistent VPN connection -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Fix (Android 14 / targetSdk 34): starting a foreground service with type
          connectedDevice requires this matching permission, otherwise startForeground()
          throws SecurityException and the VPN service crashes on launch. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-    <!-- Notifications for Android 13+ -->
+    <!-- Notifications for Android 13+ (runtime permission, requested in MainActivity) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    
-    <!-- Wake lock to keep VPN active during sleep -->
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    
+
     <!-- Boot completion for auto-start VPN -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    
-    <!-- Vibrate for connection feedback -->
-    <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- ==================================================================
-         OPTIONAL/ENHANCED PERMISSIONS
-         ================================================================== -->
-    
-    <!-- Location for server proximity suggestions (optional) -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    
-    <!-- Request install packages for app updates (optional) -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    
-    <!-- Query installed packages for protocol detection (optional) -->
+    <!-- Query installed packages for the App Filter split-tunneling tool
+         (AppsFilterTool uses PackageManager.getInstalledApplications) -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
-    
-    <!-- System alert window for overlay features (optional) -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    
-    <!-- Request ignore battery optimizations for persistent connection -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    
-    <!-- Write settings for DNS configuration (requires special handling) -->
-    <uses-permission android:name="android.permission.WRITE_SETTINGS"
-        tools:ignore="ProtectedPermissions" />
-    
-    <!-- Bluetooth for potential peripheral VPN routing (optional).
-         Fix (Android 12+ / API 31): the legacy BLUETOOTH/BLUETOOTH_ADMIN permissions are
-         no longer used on API 31+ (superseded by BLUETOOTH_CONNECT/BLUETOOTH_SCAN). Marking
-         them maxSdkVersion="30" avoids lint errors and prevents accidental runtime grants.
-         BLUETOOTH_SCAN carries neverForLocation so it does not also require
-         ACCESS_FINE_LOCATION on Android 12+. -->
-    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+
+    <!-- Bluetooth for connection sharing (ShareConnectionTool).
+         Runtime permissions on Android 12+ (API 31), requested in MainActivity with
+         rationale/settings fallback UX. BLUETOOTH_SCAN carries neverForLocation so it
+         does not also require ACCESS_FINE_LOCATION on Android 12+.
+         The legacy BLUETOOTH/BLUETOOTH_ADMIN permissions were removed - no code uses
+         the pre-31 Bluetooth APIs. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
@@ -77,8 +52,6 @@
     <!-- Network features - not required but nice to have -->
     <uses-feature android:name="android.hardware.wifi" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
-    <uses-feature android:name="android.hardware.location" android:required="false" />
-    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     
     <!-- Touchscreen and leanback support -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />

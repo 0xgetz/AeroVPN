@@ -1,9 +1,13 @@
 package com.aerovpn.ui
 
 import android.Manifest
+import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -23,23 +27,52 @@ import com.aerovpn.ui.theme.AeroVPNTheme
 
 enum class ConnectionStatus { CONNECTED, CONNECTING, DISCONNECTED, ERROR }
 
+/**
+ * Compose-observable snapshot of the runtime permissions the app cares about.
+ *
+ * Hoisted in MainActivity (which owns the ActivityResultLaunchers) and passed
+ * down to the Settings screen so users can grant or repair permissions in-app.
+ */
+class PermissionUiState {
+    /** POST_NOTIFICATIONS - runtime permission on Android 13+ (API 33). */
+    var notificationsGranted by mutableStateOf(false)
+
+    /** True when the system dialog can still be shown (never asked, or can re-ask). */
+    var notificationsCanAsk by mutableStateOf(true)
+
+    /** BLUETOOTH_CONNECT + BLUETOOTH_SCAN - runtime permissions on Android 12+ (API 31). */
+    var bluetoothGranted by mutableStateOf(false)
+    var bluetoothCanAsk by mutableStateOf(true)
+}
 
 class MainActivity : ComponentActivity() {
 
-    // Fix #9: Runtime permission launcher for POST_NOTIFICATIONS (API 33+)
+    private val permissionPrefs: SharedPreferences by lazy {
+        getSharedPreferences("aerovpn_permissions", MODE_PRIVATE)
+    }
+
+    private val permissionUi = PermissionUiState()
+
+    // Notification permission launcher (API 33+)
     private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        refreshPermissionState()
+    }
+
+    // Bluetooth permissions launcher (API 31+)
+    private val bluetoothPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        // Permission results handled silently — notifications are non-critical for core VPN function
+    ) { _ ->
+        refreshPermissionState()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Fix #9: Request POST_NOTIFICATIONS at runtime for Android 13+ (API 33+)
-        // Fix #12: Request BLUETOOTH_CONNECT and BLUETOOTH_SCAN only on API 31+
-        requestRuntimePermissions()
+        refreshPermissionState()
+        requestNotificationsOnFirstLaunch()
 
         setContent {
             AeroVPNTheme {
@@ -47,49 +80,140 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AeroVPNApp()
+                    AeroVPNApp(
+                        permissionUi = permissionUi,
+                        onRequestNotifications = ::requestNotifications,
+                        onRequestBluetooth = ::requestBluetooth,
+                        onOpenAppSettings = ::openAppSettings,
+                        onOpenNotificationSettings = ::openNotificationSettings
+                    )
                 }
             }
         }
     }
 
-    private fun requestRuntimePermissions() {
-        val permissionsToRequest = mutableListOf<String>()
+    override fun onResume() {
+        super.onResume()
+        // Re-check after returning from the system permission / settings screens
+        refreshPermissionState()
+    }
 
-        // Fix #9: POST_NOTIFICATIONS requires runtime permission on API 33+ (Android 13+)
+    // ------------------------------------------------------------------
+    // Permission state
+    // ------------------------------------------------------------------
+
+    private fun refreshPermissionState() {
+        permissionUi.notificationsGranted =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        permissionUi.notificationsCanAsk =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                canStillAsk(Manifest.permission.POST_NOTIFICATIONS, PREFS_NOTIFICATIONS_ASKED)
+
+        permissionUi.bluetoothGranted =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) ==
+                    PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) ==
+                    PackageManager.PERMISSION_GRANTED)
+        permissionUi.bluetoothCanAsk =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                (canStillAsk(Manifest.permission.BLUETOOTH_CONNECT, PREFS_BLUETOOTH_ASKED) &&
+                    canStillAsk(Manifest.permission.BLUETOOTH_SCAN, PREFS_BLUETOOTH_ASKED))
+    }
+
+    /**
+     * True if the runtime dialog can still be shown for [permission]:
+     *  - never asked before, or
+     *  - previously denied but the system still allows re-asking
+     *    (shouldShowRequestPermissionRationale() == true).
+     * False once the user picked "Don't ask again" - the only remaining path
+     * is the system app-settings page, so the UI shows an "Open Settings" action.
+     */
+    private fun canStillAsk(permission: String, askedFlag: String): Boolean {
+        if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
+            return true
+        }
+        val askedBefore = permissionPrefs.getBoolean(askedFlag, false)
+        return !askedBefore || shouldShowRequestPermissionRationale(permission)
+    }
+
+    // ------------------------------------------------------------------
+    // Permission requests
+    // ------------------------------------------------------------------
+
+    /**
+     * Notifications back the VPN foreground service on Android 13+, so ask once
+     * automatically on first launch. Afterwards the user manages this from the
+     * Permissions section in Settings - never re-spam the dialog.
+     */
+    private fun requestNotificationsOnFirstLaunch() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) return
+        if (permissionPrefs.getBoolean(PREFS_NOTIFICATIONS_ASKED, false)) return
+        requestNotifications()
+    }
+
+    private fun requestNotifications() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
+            permissionPrefs.edit().putBoolean(PREFS_NOTIFICATIONS_ASKED, true).apply()
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
 
-        // Fix #12: BLUETOOTH_CONNECT and BLUETOOTH_SCAN are runtime permissions on API 31+ (Android 12+)
+    /**
+     * Bluetooth is optional (connection sharing) and is intentionally NOT
+     * auto-requested at startup - the user opts in from Settings.
+     */
+    private fun requestBluetooth() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.BLUETOOTH_CONNECT
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                permissionsToRequest.add(Manifest.permission.BLUETOOTH_CONNECT)
-            }
-            if (ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.BLUETOOTH_SCAN
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                permissionsToRequest.add(Manifest.permission.BLUETOOTH_SCAN)
-            }
+            permissionPrefs.edit().putBoolean(PREFS_BLUETOOTH_ASKED, true).apply()
+            bluetoothPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.BLUETOOTH_CONNECT,
+                    Manifest.permission.BLUETOOTH_SCAN
+                )
+            )
         }
+    }
 
-        if (permissionsToRequest.isNotEmpty()) {
-            notificationPermissionLauncher.launch(permissionsToRequest.toTypedArray())
-        }
+    // ------------------------------------------------------------------
+    // System settings deep links (fallback once the dialog can't be shown)
+    // ------------------------------------------------------------------
+
+    private fun openAppSettings() {
+        startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:$packageName")
+            )
+        )
+    }
+
+    private fun openNotificationSettings() {
+        startActivity(
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        )
+    }
+
+    companion object {
+        private const val PREFS_NOTIFICATIONS_ASKED = "notification_permission_asked"
+        private const val PREFS_BLUETOOTH_ASKED = "bluetooth_permission_asked"
     }
 }
 
 @Composable
-fun AeroVPNApp() {
+fun AeroVPNApp(
+    permissionUi: PermissionUiState = PermissionUiState(),
+    onRequestNotifications: () -> Unit = {},
+    onRequestBluetooth: () -> Unit = {},
+    onOpenAppSettings: () -> Unit = {},
+    onOpenNotificationSettings: () -> Unit = {}
+) {
     val navController = rememberNavController()
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
 
@@ -108,7 +232,12 @@ fun AeroVPNApp() {
         ) {
             NavigationGraph(
                 navController = navController,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                permissionUi = permissionUi,
+                onRequestNotifications = onRequestNotifications,
+                onRequestBluetooth = onRequestBluetooth,
+                onOpenAppSettings = onOpenAppSettings,
+                onOpenNotificationSettings = onOpenNotificationSettings
             )
         }
 
