@@ -17,6 +17,10 @@
     
     <!-- Foreground service for persistent VPN connection -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Fix (Android 14 / targetSdk 34): starting a foreground service with type
+         connectedDevice requires this matching permission, otherwise startForeground()
+         throws SecurityException and the VPN service crashes on launch. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <!-- Notifications for Android 13+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     
@@ -54,11 +58,17 @@
     <uses-permission android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
     
-    <!-- Bluetooth for potential peripheral VPN routing (optional) -->
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <!-- Bluetooth for potential peripheral VPN routing (optional).
+         Fix (Android 12+ / API 31): the legacy BLUETOOTH/BLUETOOTH_ADMIN permissions are
+         no longer used on API 31+ (superseded by BLUETOOTH_CONNECT/BLUETOOTH_SCAN). Marking
+         them maxSdkVersion="30" avoids lint errors and prevents accidental runtime grants.
+         BLUETOOTH_SCAN carries neverForLocation so it does not also require
+         ACCESS_FINE_LOCATION on Android 12+. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
 
     <!-- ==================================================================
          FEATURE DECLARATIONS

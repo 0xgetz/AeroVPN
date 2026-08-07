@@ -6,6 +6,7 @@ package com.aerovpn.receiver
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 
 /**
  * BroadcastReceiver that handles BOOT_COMPLETED events to auto-start VPN service
@@ -40,7 +41,16 @@ class BootReceiver : BroadcastReceiver() {
                 vpnIntent.putExtra("protocol", lastProtocol)
                 
                 try {
-                    context.startForegroundService(vpnIntent)
+                    // Fix: startForegroundService() was added in API 26 (Android 8.0).
+                    // Calling it unconditionally throws NoSuchMethodError on Android 7.x
+                    // (API 24/25), crashing the app. Fall back to startService() there —
+                    // AeroVpnService calls startForeground() itself on those versions.
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(vpnIntent)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        context.startService(vpnIntent)
+                    }
                 } catch (e: Exception) {
                     // Service may not start in locked boot state
                     e.printStackTrace()
