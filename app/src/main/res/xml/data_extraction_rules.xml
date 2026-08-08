@@ -25,6 +25,11 @@
         <exclude
             domain="sharedpref"
             path="vpn_credentials.xml" />
+        <!-- AUDIT FIX: aerovpn_prefs holds the persisted last-VPN-config JSON
+             (server credentials, private keys, passwords). Never back it up. -->
+        <exclude
+            domain="sharedpref"
+            path="aerovpn_prefs.xml" />
         <exclude
             domain="file"
             path="." />
@@ -45,6 +50,10 @@
         <exclude
             domain="sharedpref"
             path="vpn_credentials.xml" />
+        <!-- AUDIT FIX: never transfer the persisted VPN credentials prefs. -->
+        <exclude
+            domain="sharedpref"
+            path="aerovpn_prefs.xml" />
         <exclude
             domain="file"
             path="." />

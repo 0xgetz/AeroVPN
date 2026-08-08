@@ -14,6 +14,11 @@
     <exclude
         domain="sharedpref"
         path="device_info.xml" />
+    <!-- AUDIT FIX: aerovpn_prefs.xml holds the persisted last-VPN-config JSON
+         (server credentials, private keys, passwords). Never back it up. -->
+    <exclude
+        domain="sharedpref"
+        path="aerovpn_prefs.xml" />
     <exclude
         domain="file"
         path="backup_key" />

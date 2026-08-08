@@ -2,7 +2,6 @@ package com.aerovpn
 
 import android.app.backup.BackupAgentHelper
 import android.app.backup.SharedPreferencesBackupHelper
-import android.app.backup.FileBackupHelper
 import android.util.Log
 
 /**
@@ -12,12 +11,13 @@ import android.util.Log
  * Without this class the system throws ClassNotFoundException whenever Android
  * triggers a backup or restore, crashing the app process.
  *
- * We back up:
- *  - Default SharedPreferences (user settings, theme, etc.)
- *  - The VPN configs shared-prefs file (stored by ExportImportTool / ConfigScreen)
- *
- * Sensitive data (private keys, passwords) should be excluded via
- * res/xml/backup_rules.xml and res/xml/data_extraction_rules.xml.
+ * AUDIT FIX: the previous helpers referenced "com.aerovpn_preferences" and
+ * "aerovpn_vpn_configs" — prefs files that no code in the app ever creates, so
+ * the agent silently backed up nothing. The app's real settings file
+ * "aerovpn_prefs" also holds the persisted last-VPN-config (credentials!), so it
+ * must NOT be registered here; res/xml/backup_rules.xml and
+ * res/xml/data_extraction_rules.xml now exclude it from system backup too.
+ * Only the non-secret permission-flag prefs are registered below.
  */
 class AeroVPNBackupAgent : BackupAgentHelper() {
 
@@ -25,27 +25,21 @@ class AeroVPNBackupAgent : BackupAgentHelper() {
         private const val TAG = "AeroVPNBackupAgent"
 
         // Keys used to identify each BackupHelper — must be unique per agent
-        private const val PREFS_BACKUP_KEY = "aerovpn_prefs"
-        private const val CONFIG_PREFS_BACKUP_KEY = "aerovpn_config_prefs"
+        private const val PERMISSIONS_BACKUP_KEY = "aerovpn_permissions"
 
-        // SharedPreferences file names (without .xml extension)
-        private const val DEFAULT_PREFS = "com.aerovpn_preferences"
-        private const val VPN_CONFIG_PREFS = "aerovpn_vpn_configs"
+        // SharedPreferences file names (without .xml extension).
+        // Only non-secret files are listed here — credentials stay on-device.
+        private const val PERMISSIONS_PREFS = "aerovpn_permissions"
     }
 
     override fun onCreate() {
         Log.d(TAG, "BackupAgent onCreate — registering helpers")
 
-        // Back up default app preferences
+        // Back up the non-secret permission-request flags (allows re-asking
+        // runtime permissions after a device restore without re-spamming dialogs).
         addHelper(
-            PREFS_BACKUP_KEY,
-            SharedPreferencesBackupHelper(this, DEFAULT_PREFS)
-        )
-
-        // Back up VPN server configurations
-        addHelper(
-            CONFIG_PREFS_BACKUP_KEY,
-            SharedPreferencesBackupHelper(this, VPN_CONFIG_PREFS)
+            PERMISSIONS_BACKUP_KEY,
+            SharedPreferencesBackupHelper(this, PERMISSIONS_PREFS)
         )
 
         Log.d(TAG, "BackupAgent helpers registered")

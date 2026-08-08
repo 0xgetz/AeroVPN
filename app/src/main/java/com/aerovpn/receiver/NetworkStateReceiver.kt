@@ -10,6 +10,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import android.util.Log
+import com.aerovpn.service.AeroVpnService
 
 /**
  * NetworkStateReceiver — proper dual-mode network monitor.
@@ -223,8 +224,11 @@ class NetworkStateReceiver : BroadcastReceiver() {
         action: String,
         extras: Map<String, Any> = emptyMap()
     ) {
+        // AUDIT FIX: use a direct class reference instead of Class.forName() —
+        // the string-based lookup broke silently under R8 obfuscation and added
+        // an unnecessary ClassNotFoundException failure path.
         try {
-            val vpnIntent = Intent(context, Class.forName("com.aerovpn.service.AeroVpnService")).apply {
+            val vpnIntent = Intent(context, AeroVpnService::class.java).apply {
                 this.action = action
                 extras.forEach { (key, value) ->
                     when (value) {

@@ -129,17 +129,20 @@
              BROADCAST RECEIVERS
              ================================================================== -->
         
-        <!-- Boot Receiver - Auto-start VPN on device boot -->
+        <!-- Boot Receiver - Auto-start VPN on device boot.
+             NOT directBootAware: the app's settings live in credential-encrypted
+             storage, which is unavailable before the user unlocks the device.
+             The old LOCKED_BOOT_COMPLETED handling crashed with
+             IllegalStateException on every pre-unlock boot (API 24+), so only
+             the post-unlock BOOT_COMPLETED / QUICKBOOT_POWERON are handled. -->
         <receiver
             android:name=".receiver.BootReceiver"
             android:enabled="true"
             android:exported="true"
-            android:permission="android.permission.RECEIVE_BOOT_COMPLETED"
-            android:directBootAware="true">
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </receiver>
@@ -162,18 +165,12 @@
             </intent-filter>
         </receiver>
 
-        <!-- Power State Receiver - Handle power events -->
-        <receiver
-            android:name=".receiver.PowerStateReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
-                <action android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
-                <action android:name="android.intent.action.SCREEN_ON" />
-                <action android:name="android.intent.action.SCREEN_OFF" />
-            </intent-filter>
-        </receiver>
+        <!-- Power state events (POWER_CONNECTED/DISCONNECTED, SCREEN_ON/OFF)
+             are handled by NetworkStateReceiver, which is registered
+             programmatically inside AeroVpnService. SCREEN_ON/SCREEN_OFF can
+             only ever be delivered to runtime-registered receivers, so the
+             previous manifest-registered, exported PowerStateReceiver was dead
+             code and has been removed. -->
 
         <!-- ==================================================================
              NOTIFICATION CHANNELS

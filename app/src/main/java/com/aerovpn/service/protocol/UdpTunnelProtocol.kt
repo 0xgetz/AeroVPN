@@ -330,6 +330,16 @@ class UdpTunnelProtocol(
         outboundFuture = null
         inboundFuture = null
 
+        // AUDIT FIX: the fixed 2-thread executor was never shut down. Each
+        // connect() creates a fresh UdpTunnelProtocol, so repeated connect/
+        // disconnect cycles leaked threads (and their 64 KB packet buffers)
+        // until the OS killed the service process.
+        try {
+            executor.shutdownNow()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error shutting down executor", e)
+        }
+
         udpSocket?.let {
             try { it.close() } catch (e: Exception) { Log.w(TAG, "Error closing UDP socket", e) }
         }

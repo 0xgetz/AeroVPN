@@ -120,11 +120,14 @@ object ShareConnectionTool {
                 return@withContext Result.failure(Exception("Hotspot already enabled"))
             }
             
-            // Use reflection to enable hotspot (API dependent)
+            // Use reflection to enable hotspot (API dependent).
+            // AUDIT FIX: the hidden signature is setWifiApEnabled(WifiConfiguration,
+            // boolean) — lookup with the boxed Boolean::class.java always threw
+            // NoSuchMethodException, so hotspot enabling silently never worked.
             val method = wifiManager.javaClass.getMethod(
                 "setWifiApEnabled",
                 android.net.wifi.WifiConfiguration::class.java,
-                Boolean::class.java
+                Boolean::class.javaPrimitiveType
             )
             
             val wifiConfig = android.net.wifi.WifiConfiguration().apply {
@@ -184,7 +187,7 @@ object ShareConnectionTool {
             val method = wifiManager.javaClass.getMethod(
                 "setWifiApEnabled",
                 android.net.wifi.WifiConfiguration::class.java,
-                Boolean::class.java
+                Boolean::class.javaPrimitiveType
             )
             
             method.invoke(wifiManager, null, false)
