@@ -25,7 +25,9 @@ import com.aerovpn.ui.navigation.NavigationGraph
 import com.aerovpn.ui.navigation.NavigationItem
 import com.aerovpn.ui.theme.AeroVPNTheme
 
-enum class ConnectionStatus { CONNECTED, CONNECTING, DISCONNECTED, ERROR }
+// NOTE: the canonical ConnectionStatus enum lives in
+// com.aerovpn.ui.screens (HomeScreen.kt). A duplicate enum here used to
+// shadow it for anyone importing com.aerovpn.ui.* — removed.
 
 /**
  * Compose-observable snapshot of the runtime permissions the app cares about.
@@ -219,9 +221,6 @@ fun AeroVPNApp(
 
     // Determine if bottom nav should be visible
     val isBottomNavVisible = currentRoute in NavigationItem.items.map { it.route }
-
-    // Connection status - should come from ViewModel
-    var connectionStatus by remember { mutableStateOf(ConnectionStatus.DISCONNECTED) }
 
     Column(
         modifier = Modifier.fillMaxSize()

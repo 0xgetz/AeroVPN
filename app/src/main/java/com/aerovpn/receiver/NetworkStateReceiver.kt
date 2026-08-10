@@ -42,6 +42,11 @@ class NetworkStateReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "NetworkStateReceiver"
 
+        // Custom actions forwarded to AeroVpnService
+        const val ACTION_NETWORK_CHANGED = "com.aerovpn.ACTION_NETWORK_CHANGED"
+        const val ACTION_SCREEN_STATE_CHANGED = "com.aerovpn.ACTION_SCREEN_STATE_CHANGED"
+        const val ACTION_POWER_STATE_CHANGED = "com.aerovpn.ACTION_POWER_STATE_CHANGED"
+
         /** Build the IntentFilter for programmatic registration. */
         fun buildIntentFilter(): IntentFilter = IntentFilter().apply {
             // These actions ONLY work with programmatically-registered receivers
@@ -245,9 +250,4 @@ class NetworkStateReceiver : BroadcastReceiver() {
         }
     }
 
-    companion object Actions {
-        const val ACTION_NETWORK_CHANGED = "com.aerovpn.ACTION_NETWORK_CHANGED"
-        const val ACTION_SCREEN_STATE_CHANGED = "com.aerovpn.ACTION_SCREEN_STATE_CHANGED"
-        const val ACTION_POWER_STATE_CHANGED = "com.aerovpn.ACTION_POWER_STATE_CHANGED"
-    }
 }

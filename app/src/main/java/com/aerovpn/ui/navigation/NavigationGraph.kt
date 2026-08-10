@@ -11,7 +11,6 @@ import com.aerovpn.ui.PermissionUiState
 import com.aerovpn.ui.screens.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -156,16 +155,14 @@ fun ToolDetailScreen(
 ) {
     // Placeholder for tool detail screens
     // Each tool (IP Hunter, Ping Tools, DNS Checker, etc.) would have its own implementation
-    androidx.compose.foundation.layout.Column(
-        modifier = androidx.compose.ui.Modifier
+    Column(
+        modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        androidx.compose.material3.Text(
+        Text(
             text = "Tool: $toolId",
-            style = androidx.compose.ui.text.TextStyle(
-                fontSize = 20.sp
-            )
+            fontSize = 20.sp
         )
     }
 }
@@ -176,16 +173,14 @@ fun ConfigDetailScreen(
     onBackClick: () -> Unit
 ) {
     // Placeholder for config detail screen
-    androidx.compose.foundation.layout.Column(
-        modifier = androidx.compose.ui.Modifier
+    Column(
+        modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        androidx.compose.material3.Text(
+        Text(
             text = "Config: $configId",
-            style = androidx.compose.ui.text.TextStyle(
-                fontSize = 20.sp
-            )
+            fontSize = 20.sp
         )
     }
 }

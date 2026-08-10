@@ -30,12 +30,8 @@
         <exclude
             domain="sharedpref"
             path="aerovpn_prefs.xml" />
-        <exclude
-            domain="file"
-            path="." />
-        <exclude
-            domain="external"
-            path="." />
+        <!-- Domains without an <include> (file, external) are never backed
+             up, so excluding them is a no-op that fails lint. -->
     </cloud-backup>
 
     <!-- Device transfer rules -->
@@ -54,8 +50,6 @@
         <exclude
             domain="sharedpref"
             path="aerovpn_prefs.xml" />
-        <exclude
-            domain="file"
-            path="." />
+        <!-- Same here: "file" domain has no <include>, so nothing to exclude. -->
     </device-transfer>
 </data-extraction-rules>

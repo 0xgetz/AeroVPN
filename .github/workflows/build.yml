@@ -6,11 +6,12 @@ on:
       - 'v*'
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -27,8 +28,11 @@ jobs:
       - name: Enable Gradle Wrapper
         run: chmod +x gradlew
 
-      - name: Build Release APK
-        run: ./gradlew clean assembleRelease --no-daemon
+      - name: Build Debug APK (installable, debug-signed)
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Build Release APK (unsigned, R8-optimized)
+        run: ./gradlew assembleRelease --no-daemon
 
       - name: Get Version Name
         id: version
@@ -36,28 +40,32 @@ jobs:
           VERSION=$(grep -oP "versionName '\K[^']+" app/build.gradle)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Upload APK to Artifacts
+      # NOTE: with splits.abi enabled the outputs are app-<abi>-*.apk and
+      # app-universal-*.apk — there is NO plain app-release-unsigned.apk.
+      # The universal APK is what end users should download.
+
+      - name: Upload Debug APK (installable)
         uses: actions/upload-artifact@v4
         with:
-          name: app-release.apk
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          name: AeroVPN-debug.apk
+          path: app/build/outputs/apk/debug/app-universal-debug.apk
 
+      - name: Upload Release APK (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: AeroVPN-release-unsigned.apk
+          path: app/build/outputs/apk/release/app-universal-release-unsigned.apk
+
+      # softprops/action-gh-release already attaches the APKs — no separate
+      # upload-release-asset step needed (the old one referenced a missing
+      # step id and the wrong APK path, so it could never have worked).
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/app-release-unsigned.apk
+          files: |
+            app/build/outputs/apk/debug/app-universal-debug.apk
+            app/build/outputs/apk/release/app-universal-release-unsigned.apk
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload APK to Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: app/build/outputs/apk/release/app-release-unsigned.apk
-          asset_name: AeroVPN-${{ steps.version.outputs.version }}.apk
-          asset_content_type: application/vnd.android.package-archive

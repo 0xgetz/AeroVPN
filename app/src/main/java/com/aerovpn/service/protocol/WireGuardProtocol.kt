@@ -390,7 +390,7 @@ data class WireGuardPeer(
     val endpoint: String? = null,
     val allowedIps: List<String> = listOf("0.0.0.0/0", "::/0"),
     val persistentKeepalive: Int? = 25
-)
+) : java.io.Serializable
 
 data class WireGuardConfig(
     override val name: String,

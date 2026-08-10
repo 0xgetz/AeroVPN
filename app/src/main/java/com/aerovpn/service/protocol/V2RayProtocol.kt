@@ -243,7 +243,8 @@ class V2RayProtocol(
                 }.start()
 
                 v2rayProcess = process
-                Log.i(TAG, "Xray process started, pid=${process.pid()}, proxyPort=$proxyPort")
+                // NOTE: Process.pid() is Java 9+ and not available in Android's SDK
+                Log.i(TAG, "Xray process started, proxyPort=$proxyPort")
 
                 // 4. Brief check: if process exits immediately it failed to start
                 Thread.sleep(300)
@@ -471,7 +472,7 @@ sealed class V2RayConfig(
         val routeMode: RouteMode = RouteMode.GLOBAL,
         val domainRules: List<String> = emptyList(),
         val ipRules: List<String> = emptyList()
-    )
+    ) : java.io.Serializable
 
     data class VMess(
         override val name: String,

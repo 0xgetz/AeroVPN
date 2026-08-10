@@ -142,3 +142,4 @@ yarn-error.log*
 
 # Test results
 test-results/
+local.properties

@@ -297,20 +297,9 @@ class SSHProtocol(
      */
     private inner class ProtectedSocketFactory : com.jcraft.jsch.SocketFactory {
 
+        // mwiede JSch 0.2.x SocketFactory only declares createSocket(host, port),
+        // getInputStream(socket) and getOutputStream(socket) — no 4-arg variant.
         override fun createSocket(host: String, port: Int): Socket {
-            val socket = Socket()
-            if (!vpnService.protect(socket)) {
-                Log.w(TAG, "Failed to protect SSH socket — possible routing loop")
-            }
-            return socket
-        }
-
-        override fun createSocket(
-            host: String,
-            port: Int,
-            clientHost: InetAddress,
-            clientPort: Int
-        ): Socket {
             val socket = Socket()
             if (!vpnService.protect(socket)) {
                 Log.w(TAG, "Failed to protect SSH socket — possible routing loop")

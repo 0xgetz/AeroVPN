@@ -30,8 +30,10 @@ jobs:
             - ~/.gradle
             - /usr/local/android-sdk
       
+      # NOTE: splits.abi is enabled, so the outputs are app-<abi>-debug.apk
+      # and app-universal-debug.apk — plain app-debug.apk does not exist.
       - store_artifacts:
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/app-universal-debug.apk
           destination: AeroVPN-debug.apk
       
       - store_artifacts:

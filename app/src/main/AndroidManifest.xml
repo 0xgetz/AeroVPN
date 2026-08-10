@@ -198,6 +198,10 @@
         <!-- ==================================================================
              INIT PROVIDER - Application startup
              ================================================================== -->
+        <!-- AeroVPNApplication implements androidx.work.Configuration.Provider
+             (on-demand init), so the default WorkManagerInitializer MUST be
+             removed here — lint check RemoveWorkManagerInitializer fails the
+             release build otherwise. -->
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
@@ -205,13 +209,15 @@
             tools:node="merge">
             <meta-data
                 android:name="androidx.work.WorkManagerInitializer"
-                android:value="androidx.startup" />
+                android:value="androidx.startup"
+                tools:node="remove" />
         </provider>
 
         <!-- ==================================================================
              WORK MANAGER - Background tasks
              ================================================================== -->
-        <!-- WorkManager is initialized via InitializationProvider above -->
+        <!-- WorkManager is initialized on-demand via AeroVPNApplication's
+             Configuration.Provider (workManagerConfiguration). -->
 
     </application>
 

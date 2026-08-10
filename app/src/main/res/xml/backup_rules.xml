@@ -19,7 +19,7 @@
     <exclude
         domain="sharedpref"
         path="aerovpn_prefs.xml" />
-    <exclude
-        domain="file"
-        path="backup_key" />
+    <!-- NOTE: no <include> covers the "file" domain, so files are never
+         backed up anyway — the old <exclude domain="file" path="backup_key"/>
+         was a no-op and failed lint (FullBackupContent). -->
 </full-backup-content>

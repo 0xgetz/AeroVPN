@@ -133,15 +133,19 @@ dependencies {
     ksp 'androidx.room:room-compiler:2.6.1' // Fix #14: replaced annotationProcessor with ksp
 
     // VPN Libraries
-    // WireGuard - Fix #19: official WireGuard Android tunnel library
-    implementation 'com.wireguard.android:tunnel:1.0.20230705'
-    
+    // NOTE: com.wireguard.android:tunnel is NOT published to Maven Central /
+    // google() / jitpack — keeping it breaks dependency resolution. The app
+    // integrates WireGuard's GoBackend via reflection (WireGuardProtocol), so
+    // no compile-time dependency is required. If you later bundle the tunnel
+    // AAR, drop it in app/libs and use: implementation files('libs/tunnel.aar')
+
     // JSCH for SSH - Fix #16: upgraded from 0.1.55 to mwiede fork with security fixes
     implementation 'com.github.mwiede:jsch:0.2.16'
-    
-    // V2Ray core - Fix #18: use tun2socks + v2ray-core via JitPack
-    implementation 'com.github.2dust:v2rayNG:1.8.19'
-    // Fallback: implementation files('libs/v2ray-core.aar')
+
+    // NOTE: com.github.2dust:v2rayNG is an APPLICATION, not a library — it is
+    // not published as a Maven artifact and broke the build. V2RayProtocol runs
+    // an external Xray/V2Ray core binary via ProcessBuilder, so no compile-time
+    // dependency is needed here either.
     
     // Shadowsocks library
     // implementation 'com.github.shadowsocks:shadowsocks-libev:3.3.5' // not available on jitpack

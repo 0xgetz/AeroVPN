@@ -293,7 +293,8 @@ class ShadowsocksProtocol(
                 }.start()
 
                 ssProcess = process
-                Log.i(TAG, "ss-local started, pid=${process.pid()}, localPort=$LOCAL_PROXY_PORT")
+                // NOTE: Process.pid() is Java 9+ and not available in Android's SDK
+                Log.i(TAG, "ss-local started, localPort=$LOCAL_PROXY_PORT")
 
                 // Brief liveness check
                 Thread.sleep(400)

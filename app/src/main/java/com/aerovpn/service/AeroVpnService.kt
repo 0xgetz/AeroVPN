@@ -155,8 +155,8 @@ class AeroVpnService : VpnService() {
 
             // CRITICAL FIX (C2): handle network-change action sent by NetworkStateReceiver
             NetworkStateReceiver.ACTION_NETWORK_CHANGED -> {
-                val isConnected = intent.getBooleanExtra("is_connected", false)
-                val networkType = intent.getStringExtra("network_type") ?: "Unknown"
+                val isConnected = intent?.getBooleanExtra("is_connected", false) ?: false
+                val networkType = intent?.getStringExtra("network_type") ?: "Unknown"
                 Log.d(TAG, "Network changed: connected=$isConnected type=$networkType")
                 if (isConnected && _connectionState.value is ConnectionState.Error) {
                     // Auto-reconnect on network recovery if we were in error state
@@ -174,13 +174,13 @@ class AeroVpnService : VpnService() {
             }
 
             NetworkStateReceiver.ACTION_SCREEN_STATE_CHANGED -> {
-                val screenOn = intent.getBooleanExtra("screen_on", true)
+                val screenOn = intent?.getBooleanExtra("screen_on", true) ?: true
                 Log.d(TAG, "Screen state changed: on=$screenOn")
                 // Could implement wake-lock adjustments here
             }
 
             NetworkStateReceiver.ACTION_POWER_STATE_CHANGED -> {
-                val powerConnected = intent.getBooleanExtra("power_connected", false)
+                val powerConnected = intent?.getBooleanExtra("power_connected", false) ?: false
                 Log.d(TAG, "Power state changed: connected=$powerConnected")
             }
 

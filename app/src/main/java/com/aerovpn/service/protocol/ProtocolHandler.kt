@@ -90,12 +90,17 @@ data class ConnectionStatistics(
 
 /**
  * Base class for protocol-specific configurations
+ *
+ * Implements [java.io.Serializable] so configs can be passed to
+ * AeroVpnService via Intent extras (ACTION_CONNECT / EXTRA_CONFIG). On API 33+
+ * Intent.getSerializableExtra(String, Class<T>) requires T : Serializable —
+ * without this interface the service module does not compile.
  */
-abstract class ProtocolConfig {
+abstract class ProtocolConfig : java.io.Serializable {
     abstract val serverAddress: String
     abstract val serverPort: Int
     abstract val name: String
-    
+
     /**
      * Validate configuration parameters
      * @return true if configuration is valid
