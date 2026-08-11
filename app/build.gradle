@@ -12,8 +12,8 @@ android {
         applicationId "com.aerovpn"
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 2
+        versionName "1.1.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -64,6 +64,15 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // CRITICAL: the bundled native cores (libxray.so / libtun2socks.so)
+            // are real ELF executables disguised as shared libraries so that
+            // PackageManager extracts them to nativeLibraryDir with exec
+            // permission. They MUST be extracted to disk — the default
+            // extractNativeLibs=false (page-aligned, mmapped from the APK)
+            // would leave nothing executable on the filesystem.
+            useLegacyPackaging = true
+        }
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
             excludes += '/META-INF/DEPENDENCIES'
@@ -133,11 +142,16 @@ dependencies {
     ksp 'androidx.room:room-compiler:2.6.1' // Fix #14: replaced annotationProcessor with ksp
 
     // VPN Libraries
-    // NOTE: com.wireguard.android:tunnel is NOT published to Maven Central /
-    // google() / jitpack — keeping it breaks dependency resolution. The app
-    // integrates WireGuard's GoBackend via reflection (WireGuardProtocol), so
-    // no compile-time dependency is required. If you later bundle the tunnel
-    // AAR, drop it in app/libs and use: implementation files('libs/tunnel.aar')
+    // WireGuard-Android tunnel library — available on Maven Central. It bundles
+    // libwg-go.so (wireguard-go userspace backend, all ABIs) plus the
+    // com.wireguard.android.backend.WireGuardGo JNI entry points that
+    // WireGuardProtocol drives via reflection (wgTurnOn/wgTurnOff/
+    // wgGetSocketV4/wgGetSocketV6).
+    implementation 'com.wireguard.android:tunnel:1.0.20230706'
+
+    // NOTE: Xray-core and tun2socks are bundled as executable "lib*.so" files
+    // under src/main/jniLibs/<abi>/ (see V2RayProtocol). They run as child
+    // processes, so no compile-time dependency is needed for them.
 
     // JSCH for SSH - Fix #16: upgraded from 0.1.55 to mwiede fork with security fixes
     implementation 'com.github.mwiede:jsch:0.2.16'

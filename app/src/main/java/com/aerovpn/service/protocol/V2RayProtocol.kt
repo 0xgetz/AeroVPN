@@ -2,6 +2,8 @@ package com.aerovpn.service.protocol
 
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
+import android.system.Os
+import android.system.OsConstants
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,18 +17,29 @@ import org.json.JSONObject
 import org.json.JSONArray
 import java.io.File
 import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 
 /**
- * V2Ray/Xray protocol implementation.
+ * V2Ray/Xray protocol implementation — fully functional end-to-end data path:
  *
- * CRITICAL FIX (C3): configureVpnInterface() now calls builder.establish() and stores
- * the returned ParcelFileDescriptor in vpnInterface. Without calling establish() the
- * kernel tun device is never created, so no traffic can flow through the VPN tunnel.
+ *   app traffic ──► tun fd ──► libtun2socks.so (gVisor TCP/UDP stack)
+ *                    ──► SOCKS5 127.0.0.1:proxyPort ──► libxray.so ──► server
  *
- * CRITICAL FIX (C4): startV2RayCore() / stopV2RayCore() no longer use fake delay().
- * Instead they write the V2Ray JSON config to a file in the app's files directory and
- * launch the Xray/V2Ray native binary (if present) via ProcessBuilder, or fall back to
- * a no-op stub when the binary is absent so the VPN tunnel at least opens correctly.
+ * 1. configureVpnInterface() calls builder.establish() and stores the returned
+ *    ParcelFileDescriptor in vpnInterface. Our own UID is excluded from the VPN
+ *    so the Xray/tun2socks child processes (same UID) reach the server directly
+ *    instead of looping back into the tun device.
+ * 2. startV2RayCore() writes the Xray JSON config, copies geoip/geosite assets
+ *    next to it, launches the bundled Xray binary and waits until the local
+ *    SOCKS port actually accepts connections.
+ * 3. startTun2Socks() clears FD_CLOEXEC on the tun fd (android.system.Os.fcntlInt)
+ *    so the fd survives exec() into the tun2socks child, then launches
+ *    `libtun2socks.so -device fd://<fd> -proxy socks5://127.0.0.1:<port>`.
+ *
+ * Both native binaries are real ELF executables packaged as "lib*.so" inside
+ * jniLibs/<abi>/ so PackageManager extracts them with exec permission into
+ * nativeLibraryDir (jniLibs.useLegacyPackaging=true in build.gradle).
  */
 class V2RayProtocol(
     private val vpnService: VpnService,
@@ -36,9 +49,13 @@ class V2RayProtocol(
     companion object {
         private const val TAG = "V2RayProtocol"
         private const val DEFAULT_MTU = 1500
-        // Xray binary bundled in app assets / jniLibs; name may vary by ABI
+        // Xray/tun2socks binaries bundled in jniLibs (extracted to nativeLibraryDir)
         private const val XRAY_BINARY = "libxray.so"
+        private const val TUN2SOCKS_BINARY = "libtun2socks.so"
         private const val CONFIG_FILENAME = "v2ray_config.json"
+        private const val SOCKS_WAIT_TIMEOUT_MS = 10_000L
+        // Geo data files bundled in assets/ and copied next to the Xray config
+        private val GEO_ASSETS = listOf("geoip.dat", "geosite.dat")
     }
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
@@ -53,6 +70,9 @@ class V2RayProtocol(
 
     // Handle to the running V2Ray/Xray subprocess
     @Volatile private var v2rayProcess: Process? = null
+
+    // Handle to the running tun2socks subprocess (tun fd -> SOCKS bridge)
+    @Volatile private var tun2socksProcess: Process? = null
 
     // -------------------------------------------------------------------------
     // ProtocolHandler implementation
@@ -83,8 +103,9 @@ class V2RayProtocol(
             }
             vpnInterface = pfd
 
-            // CRITICAL FIX (C4): start real V2Ray/Xray core instead of delay()
-            val started = startV2RayCore(config)
+            // Start Xray core, wait for its SOCKS port, then attach tun2socks
+            // to the tun fd so real traffic flows through the tunnel.
+            val started = startV2RayCore(config, pfd)
             if (!started) {
                 pfd.close()
                 vpnInterface = null
@@ -181,6 +202,16 @@ class V2RayProtocol(
             }
         }
 
+        // CRITICAL (routing loop): exclude our own UID from the tunnel. The Xray
+        // and tun2socks child processes share this UID — without this their
+        // outbound connections to the server would be routed back into the tun
+        // device and the tunnel could never carry traffic.
+        try {
+            builder.addDisallowedApplication(vpnService.packageName)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to exclude self from VPN", e)
+        }
+
         builder.setSession("AeroVPN-${config.protocolType.name}")
 
         // CRITICAL FIX (C3): actually open the tun interface
@@ -200,57 +231,65 @@ class V2RayProtocol(
     // -------------------------------------------------------------------------
 
     /**
-     * Write config JSON to disk and launch the Xray binary via ProcessBuilder.
-     * Falls back gracefully if the binary is not bundled (CI / emulator builds).
+     * Full data-path bring-up:
+     *   1. copy geoip/geosite assets next to the config
+     *   2. write the Xray JSON config
+     *   3. launch the bundled Xray binary
+     *   4. wait until the local SOCKS port accepts connections
+     *   5. launch tun2socks on the established tun fd (inherited via exec)
+     *
+     * Returns false (after rolling back any started component) on failure.
      */
-    private suspend fun startV2RayCore(config: V2RayConfig): Boolean {
+    private suspend fun startV2RayCore(config: V2RayConfig, tunPfd: ParcelFileDescriptor): Boolean {
         return withContext(Dispatchers.IO) {
             try {
                 proxyPort = config.proxyPort
 
-                // 1. Write JSON config to app files directory
+                // 1. Geo data: XRAY_LOCATION_ASSET points at filesDir, so the
+                //    .dat files must live there.
+                ensureGeoAssets()
+
+                // 2. Write JSON config to app files directory
                 val configJson = generateV2RayConfig(config)
                 val configFile = File(vpnService.filesDir, CONFIG_FILENAME)
                 configFile.writeText(configJson)
                 Log.d(TAG, "V2Ray config written to ${configFile.absolutePath}")
 
-                // 2. Locate Xray binary (bundled as a native lib or in assets)
-                val binaryFile = locateXrayBinary()
-                if (binaryFile == null || !binaryFile.exists()) {
-                    Log.w(TAG, "Xray binary not found at expected paths — VPN tunnel open but core not running")
-                    // Tunnel interface IS open (establish() was called above).
-                    // Traffic routing via tun2socks or similar is expected when binary ships.
-                    return@withContext true
+                // 3. Launch the bundled Xray executable
+                val xrayBinary = locateNativeBinary(XRAY_BINARY)
+                if (xrayBinary == null) {
+                    Log.e(TAG, "Xray binary ($XRAY_BINARY) not found in nativeLibraryDir")
+                    return@withContext false
                 }
-
-                if (!binaryFile.canExecute()) {
-                    binaryFile.setExecutable(true)
-                }
-
-                // H3 note: the Xray subprocess owns its sockets, which cannot be
-                // protect()ed from this process, so its outbound connection to the
-                // server is routed through the tun. A complete fix requires running
-                // the core in-process (libv2ray) with a protected socket factory or
-                // fwmark-based routing rules.
-                // 3. Launch Xray with the config file
-                val process = ProcessBuilder(
-                    binaryFile.absolutePath,
+                val xray = ProcessBuilder(
+                    xrayBinary.absolutePath,
                     "run",
                     "-c", configFile.absolutePath
                 ).apply {
                     environment()["XRAY_LOCATION_ASSET"] = vpnService.filesDir.absolutePath
                     redirectErrorStream(true)
                 }.start()
+                v2rayProcess = xray
+                drainProcessOutput(xray, "xray")
 
-                v2rayProcess = process
-                // NOTE: Process.pid() is Java 9+ and not available in Android's SDK
-                Log.i(TAG, "Xray process started, proxyPort=$proxyPort")
-
-                // 4. Brief check: if process exits immediately it failed to start
                 Thread.sleep(300)
-                if (!process.isAlive) {
-                    val output = process.inputStream.bufferedReader().readText()
-                    Log.e(TAG, "Xray process exited immediately: $output")
+                if (!xray.isAlive) {
+                    Log.e(TAG, "Xray process exited immediately after start")
+                    return@withContext false
+                }
+                Log.i(TAG, "Xray process started (${xrayBinary.name})")
+
+                // 4. Wait until the SOCKS inbound actually accepts connections —
+                //    "process alive" alone says nothing about the proxy being up.
+                if (!waitForTcpPort("127.0.0.1", proxyPort, SOCKS_WAIT_TIMEOUT_MS)) {
+                    Log.e(TAG, "Xray SOCKS port $proxyPort never came up")
+                    return@withContext false
+                }
+                Log.i(TAG, "Xray SOCKS inbound ready on 127.0.0.1:$proxyPort")
+
+                // 5. Bridge the tun fd to the SOCKS proxy via tun2socks.
+                if (!startTun2Socks(tunPfd, config.mtu ?: DEFAULT_MTU, proxyPort)) {
+                    Log.e(TAG, "Failed to start tun2socks")
                     return@withContext false
                 }
 
@@ -259,12 +298,64 @@ class V2RayProtocol(
                 Log.e(TAG, "Failed to start V2Ray core", e)
                 false
             }
+        }.also { ok ->
+            if (!ok) stopV2RayCore()
+        }
+    }
+
+    /**
+     * Launch libtun2socks.so with the tun fd inherited across exec().
+     *
+     * Java/ART file descriptors are created O_CLOEXEC, so the fd would normally
+     * vanish when the child exec()s. Clearing FD_CLOEXEC via
+     * android.system.Os.fcntlInt lets the child inherit the very same tun
+     * device — no root, no /dev/net/tun access required.
+     */
+    private fun startTun2Socks(tunPfd: ParcelFileDescriptor, mtu: Int, socksPort: Int): Boolean {
+        return try {
+            val t2sBinary = locateNativeBinary(TUN2SOCKS_BINARY)
+            if (t2sBinary == null) {
+                Log.e(TAG, "tun2socks binary ($TUN2SOCKS_BINARY) not found in nativeLibraryDir")
+                return false
+            }
+
+            val tunFd = tunPfd.fd
+            // Allow the fd to survive exec() into the tun2socks child.
+            Os.fcntlInt(tunPfd.fileDescriptor, OsConstants.F_SETFD, 0)
+
+            val proc = ProcessBuilder(
+                t2sBinary.absolutePath,
+                "-device", "fd://$tunFd",
+                "-proxy", "socks5://127.0.0.1:$socksPort",
+                "-mtu", mtu.toString(),
+                "-loglevel", "warning"
+            ).redirectErrorStream(true).start()
+            tun2socksProcess = proc
+            drainProcessOutput(proc, "tun2socks")
+
+            Thread.sleep(300)
+            if (!proc.isAlive) {
+                Log.e(TAG, "tun2socks exited immediately after start")
+                return false
+            }
+            Log.i(TAG, "tun2socks started on fd=$tunFd, mtu=$mtu")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start tun2socks", e)
+            false
         }
     }
 
     private suspend fun stopV2RayCore() {
         withContext(Dispatchers.IO) {
             try {
+                tun2socksProcess?.let { proc ->
+                    proc.destroy()
+                    try { proc.waitFor() } catch (_: InterruptedException) { proc.destroyForcibly() }
+                    Log.i(TAG, "tun2socks process stopped")
+                }
+                tun2socksProcess = null
+
                 v2rayProcess?.let { proc ->
                     proc.destroy()
                     try { proc.waitFor() } catch (_: InterruptedException) { proc.destroyForcibly() }
@@ -282,17 +373,57 @@ class V2RayProtocol(
         }
     }
 
-    /** Look for the Xray binary in standard Android lib and files locations. */
-    private fun locateXrayBinary(): File? {
-        val candidates = listOf(
-            // Installed as native lib (preferred — execute directly)
-            File(vpnService.applicationInfo.nativeLibraryDir, XRAY_BINARY),
-            File(vpnService.applicationInfo.nativeLibraryDir, "xray"),
-            // Copied to files dir during first run
-            File(vpnService.filesDir, "xray"),
-            File(vpnService.filesDir, XRAY_BINARY)
-        )
-        return candidates.firstOrNull { it.exists() }
+    /** Copy bundled geo data files from assets to filesDir (once, version-agnostic). */
+    private fun ensureGeoAssets() {
+        GEO_ASSETS.forEach { name ->
+            try {
+                val target = File(vpnService.filesDir, name)
+                if (target.exists() && target.length() > 0) return@forEach
+                vpnService.assets.open(name).use { input ->
+                    target.outputStream().use { output -> input.copyTo(output) }
+                }
+                Log.d(TAG, "Copied geo asset $name (${target.length()} bytes)")
+            } catch (e: Exception) {
+                // Xray can still run without them (plain-IP routing configs),
+                // so a missing asset is a warning, not a fatal error.
+                Log.w(TAG, "Geo asset $name unavailable: ${e.message}")
+            }
+        }
+    }
+
+    /** Poll until a local TCP port accepts connections or the deadline passes. */
+    private fun waitForTcpPort(host: String, port: Int, timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                Socket().use { it.connect(InetSocketAddress(host, port), 250) }
+                return true
+            } catch (_: Exception) {
+                Thread.sleep(200)
+            }
+        }
+        return false
+    }
+
+    /** Continuously drain child stdout/stderr so the pipe buffer never fills up. */
+    private fun drainProcessOutput(proc: Process, tag: String) {
+        Thread({
+            try {
+                proc.inputStream.bufferedReader().forEachLine { Log.d("AeroVPN-$tag", it) }
+            } catch (_: Exception) { /* stream closed on destroy */ }
+        }, "log-$tag").apply { isDaemon = true }.start()
+    }
+
+    /** Locate a bundled native executable inside nativeLibraryDir. */
+    private fun locateNativeBinary(name: String): File? {
+        val nativeDir = vpnService.applicationInfo.nativeLibraryDir
+        val f = File(nativeDir, name)
+        if (!f.exists()) {
+            Log.e(TAG, "Native binary missing: ${f.absolutePath}")
+            return null
+        }
+        if (!f.canExecute()) f.setExecutable(true)
+        return f
     }
 
     // -------------------------------------------------------------------------

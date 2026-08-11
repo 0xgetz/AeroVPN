@@ -22,9 +22,10 @@ import java.net.InetAddress
  * file descriptor to bind the tunnel to — the VPN never carries traffic.
  *
  * HIGH FIX: The WireGuard GoBackend (wireguard-go) is used when the native lib is
- * available. The tun fd is handed to the backend via the standard WireGuard-Android
- * GoBackend.wgTurnOn() call. Falls back to kernel WireGuard via wg-quick-equivalent
- * ProcessBuilder if present.
+ * available. The tun fd is handed to the backend via the private static native
+ * GoBackend.wgTurnOn() entry point shipped in com.wireguard.android:tunnel,
+ * and the backend's endpoint sockets are protected via wgGetSocketV4/V6 +
+ * VpnService.protect(). Falls back to a wg-quick-style process if present.
  */
 class WireGuardProtocol(
     private val vpnService: VpnService? = null,
@@ -193,12 +194,12 @@ class WireGuardProtocol(
      * Start the WireGuard backend using the GoBackend native lib if available,
      * otherwise fall back to a wg-quick-style process.
      *
-     * The WireGuard-Android GoBackend exposes:
+     * The WireGuard-Android tunnel library (libwg-go.so) exposes these as
+     * private static natives on com.wireguard.android.backend.GoBackend:
      *   int wgTurnOn(String ifName, int tunFd, String settings)
      *   void wgTurnOff(int handle)
+     *   int wgGetSocketV4/V6(int handle)
      *   String wgVersion()
-     *
-     * These are exposed via JNI in libwg-go.so (wireguard-android project).
      */
     private fun startWireGuardBackend(config: WireGuardConfig, pfd: ParcelFileDescriptor): Boolean {
         return try {
@@ -213,37 +214,107 @@ class WireGuardProtocol(
         }
     }
 
+    /**
+     * Load libwg-go.so (bundled by com.wireguard.android:tunnel) into this
+     * process. System.loadLibrary is enough on healthy devices; fall back to
+     * the library's own SharedLibraryLoader which manually extracts the .so
+     * for devices with a broken PackageManager lib installation.
+     */
+    private fun loadWgGoLibrary(): Boolean {
+        try {
+            System.loadLibrary("wg-go")
+            return true
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "System.loadLibrary(wg-go) failed: ${e.message} — trying SharedLibraryLoader")
+        }
+        return try {
+            val loader = Class.forName("com.wireguard.android.util.SharedLibraryLoader")
+            loader.getMethod("loadSharedLibrary", android.content.Context::class.java, String::class.java)
+                .invoke(null, vpnService, "wg-go")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "SharedLibraryLoader fallback failed", e)
+            false
+        }
+    }
+
+    /**
+     * Resolve a (possibly private) static method on the given class. The JNI
+     * entry points in the published tunnel AAR are declared `private static`
+     * on GoBackend, so getDeclaredMethod + setAccessible is required —
+     * getMethod() would throw NoSuchMethodException.
+     */
+    private fun staticMethod(clazz: Class<*>, name: String, vararg params: Class<*>): java.lang.reflect.Method =
+        clazz.getDeclaredMethod(name, *params).apply { isAccessible = true }
+
     private fun tryGoBackend(config: WireGuardConfig, pfd: ParcelFileDescriptor): Boolean {
         return try {
-            // H3 FIX: wgTurnOn is a STATIC native method on WireGuardGo
-            // (com.wireguard.android:tunnel), not an instance method on
-            // GoBackend. The old reflection targeted GoBackend and always
-            // failed, so WireGuard could never connect. WireGuardGo creates the
-            // backend's UDP socket inside wireguard-go and returns a handle.
-            val wgGoClass = Class.forName("com.wireguard.android.backend.WireGuardGo")
+            // The native entry points live as private static natives on
+            // GoBackend (verified against tunnel-1.0.20230706.aar):
+            //   static native int    wgTurnOn(String ifName, int tunFd, String settings)
+            //   static native void   wgTurnOff(int handle)
+            //   static native int    wgGetSocketV4/V6(int handle)
+            //   static native String wgVersion()
+            if (!loadWgGoLibrary()) return false
+            val wgGoClass = Class.forName("com.wireguard.android.backend.GoBackend")
+
+            try {
+                val version = staticMethod(wgGoClass, "wgVersion").invoke(null) as? String
+                Log.i(TAG, "wireguard-go version: $version")
+            } catch (e: Exception) {
+                Log.w(TAG, "wgVersion unavailable: ${e.message}")
+            }
 
             // Build the wg settings string (userspace WireGuard format)
             val settings = buildWgSettings(config)
 
-            val turnOnMethod = wgGoClass.getMethod(
-                "wgTurnOn", String::class.java, Int::class.java, String::class.java
-            )
-            val handle = turnOnMethod.invoke(null, "wg0", pfd.fd, settings) as Int
+            val handle = staticMethod(
+                wgGoClass, "wgTurnOn", String::class.java, Int::class.java, String::class.java
+            ).invoke(null, "wg0", pfd.fd, settings) as Int
             tunnelHandle = handle
 
             if (handle < 0) {
-                Log.e(TAG, "WireGuardGo wgTurnOn failed with handle=$handle")
+                Log.e(TAG, "wgTurnOn failed with handle=$handle")
                 return false
             }
+
+            // CRITICAL (routing loop): hand the backend's UDP sockets to
+            // VpnService.protect() so endpoint traffic bypasses the tun.
+            // This mirrors exactly what the official GoBackend.setState()
+            // does after wgTurnOn(). Without it the encrypted WireGuard
+            // packets loop back into the tunnel and nothing connects.
+            protectBackendSockets(wgGoClass, handle)
 
             Log.i(TAG, "WireGuard GoBackend started, handle=$handle")
             true
         } catch (e: ClassNotFoundException) {
-            Log.w(TAG, "WireGuardGo class not found — falling back to process mode")
+            Log.w(TAG, "GoBackend class not found — falling back to process mode")
             false
         } catch (e: Exception) {
             Log.w(TAG, "GoBackend start failed: ${e.message} — falling back to process mode")
             false
+        }
+    }
+
+    /**
+     * Retrieve the wireguard-go endpoint sockets (v4 + v6) via the GoBackend
+     * JNI accessors and protect() them, exactly like the stock GoBackend does.
+     * Failures here are non-fatal: the fwmark=0x1a44 setting in the wg
+     * settings string acts as a second line of defense.
+     */
+    private fun protectBackendSockets(wgGoClass: Class<*>, handle: Int) {
+        val svc = vpnService ?: return
+        for (getter in listOf("wgGetSocketV4", "wgGetSocketV6")) {
+            try {
+                val sockFd = staticMethod(wgGoClass, getter, Int::class.java)
+                    .invoke(null, handle) as Int
+                if (sockFd >= 0) {
+                    val ok = svc.protect(sockFd)
+                    Log.i(TAG, "protect($getter fd=$sockFd) -> $ok")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "$getter unavailable: ${e.message}")
+            }
         }
     }
 
@@ -343,11 +414,11 @@ class WireGuardProtocol(
     private fun cleanup() {
         isActive = false
 
-        // Stop GoBackend (static WireGuardGo.wgTurnOff — matches tryGoBackend)
+        // Stop GoBackend (static GoBackend.wgTurnOff — matches tryGoBackend)
         if (tunnelHandle >= 0) {
             try {
-                val wgGoClass = Class.forName("com.wireguard.android.backend.WireGuardGo")
-                wgGoClass.getMethod("wgTurnOff", Int::class.java)
+                val wgGoClass = Class.forName("com.wireguard.android.backend.GoBackend")
+                staticMethod(wgGoClass, "wgTurnOff", Int::class.java)
                     .invoke(null, tunnelHandle)
                 Log.d(TAG, "GoBackend stopped")
             } catch (_: Exception) {}

@@ -5,13 +5,14 @@
 [![API](https://img.shields.io/badge/SDK-24%2B-orange.svg)](https://developer.android.com/about/versions/nougat/android-7.0)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.22-purple.svg)](https://kotlinlang.org/)
 
-**Production-ready Android VPN application with multi-protocol support - No ads, privacy first, APK < 15MB**
+**Production-ready Android VPN application with multi-protocol support - No ads, privacy first, fully functional native VPN cores**
 
-AeroVPN is a lightweight, feature-rich VPN client for Android that supports multiple tunneling protocols including WireGuard, V2Ray (VMess/VLess/Trojan/Shadowsocks), SSH, and more. Built with modern Android technologies like Jetpack Compose and optimized for minimal size without compromising functionality.
+AeroVPN is a feature-rich VPN client for Android that supports multiple tunneling protocols including WireGuard, V2Ray/Xray (VMess/VLess/Trojan/Shadowsocks), SSH, and more. Built with modern Android technologies like Jetpack Compose. Since v1.1.0 the app **bundles the real native cores** (Xray-core, tun2socks, wireguard-go) so the tunnel actually carries traffic end-to-end.
 
 ## Table of Contents
 
 - [Features](#features)
+- [Native VPN Cores](#native-vpn-cores)
 - [Screenshots](#screenshots)
 - [Prerequisites](#prerequisites)
 - [Build Instructions](#build-instructions)
@@ -29,9 +30,9 @@ AeroVPN is a lightweight, feature-rich VPN client for Android that supports mult
 ## Features
 
 ### Core Features
-- **Multi-Protocol Support**: WireGuard, V2Ray (VMess, VLess, Trojan, Shadowsocks), SSH, and custom UDP tunnels
+- **Multi-Protocol Support**: WireGuard, V2Ray/Xray (VMess, VLess, Trojan, Shadowsocks), SSH, and custom UDP tunnels
+- **Real Native Cores**: Xray-core, tun2socks (gVisor) and wireguard-go bundled in the APK — the VPN tunnel is fully functional end-to-end
 - **No Ads**: Completely ad-free experience with no tracking or telemetry
-- **Lightweight**: Optimized APK size under 15MB with full functionality
 - **Material 3 Design**: Modern, beautiful UI with dark theme support
 - **Split Tunneling**: Choose which apps use VPN connection
 - **Kill Switch**: Automatically blocks internet if VPN disconnects
@@ -55,6 +56,32 @@ AeroVPN is a lightweight, feature-rich VPN client for Android that supports mult
 - Local-only configuration storage
 - Encrypted configuration export
 - No analytics or tracking
+
+---
+
+## Native VPN Cores
+
+Since **v1.1.0** AeroVPN ships the actual native cores, so the VPN works end-to-end (no stubs, no simulated tunnels):
+
+| Core | Source | Packaging | Role |
+|------|--------|-----------|------|
+| **Xray-core** v26.3.27 | Official [XTLS/Xray-core](https://github.com/XTLS/Xray-core) release binaries | `jniLibs/<abi>/libxray.so` (executable) | VMess/VLess/Trojan/Shadowsocks proxy core, exposes local SOCKS5 on `127.0.0.1:10808` |
+| **tun2socks** | Built from [xjasonlyu/tun2socks](https://github.com/xjasonlyu/tun2socks) (gVisor netstack) | `jniLibs/<abi>/libtun2socks.so` (executable) | Bridges the Android `tun` fd to the Xray SOCKS proxy |
+| **wireguard-go** | Maven Central `com.wireguard.android:tunnel:1.0.20230706` | `libwg-go.so` (JNI, in-process) | Userspace WireGuard backend |
+| geoip/geosite | Official Xray release | `assets/` (copied to `filesDir` at first run) | Xray routing data |
+
+**Data path (Xray protocols):**
+
+```
+app traffic ─► tun fd ─► libtun2socks.so ─► SOCKS5 127.0.0.1:10808 ─► libxray.so ─► server
+```
+
+Implementation notes:
+- The executables are packaged as `lib*.so` so PackageManager extracts them with exec permission into `nativeLibraryDir` (`jniLibs.useLegacyPackaging=true`).
+- The `tun` file descriptor is passed to the tun2socks child process by clearing `FD_CLOEXEC` (`android.system.Os.fcntlInt`) before `exec()` — no root required.
+- The app's own UID is excluded from the VPN (`addDisallowedApplication`) so Xray/tun2socks traffic to the server never loops back into the tunnel.
+- WireGuard runs **in-process** via the tunnel library's JNI entry points (`GoBackend.wgTurnOn/wgTurnOff/wgGetSocketV4/V6`); endpoint sockets are protected with `VpnService.protect()`.
+- ABI coverage: `arm64-v8a`, `armeabi-v7a`, `x86_64` (+ WireGuard also ships `x86`).
 
 ---
 

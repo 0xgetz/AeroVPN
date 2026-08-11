@@ -50,9 +50,14 @@
 
 # ============================================
 # WireGuard / V2Ray native integration (reflection via Class.forName)
-# The classes are not bundled; rules are here so R8 stays quiet when a
-# future build adds the AARs.
+# WireGuardProtocol calls com.wireguard.android.backend.WireGuardGo
+# (wgTurnOn/wgTurnOff/wgGetSocketV4/wgGetSocketV6) by name via reflection,
+# so those classes and their native methods MUST survive R8 renaming/removal.
 # ============================================
+-keep class com.wireguard.android.** { *; }
+-keepclasseswithmembers class com.wireguard.android.** {
+    native <methods>;
+}
 -dontwarn com.wireguard.**
 -dontwarn com.v2ray.**
 -dontwarn libv2ray.**
